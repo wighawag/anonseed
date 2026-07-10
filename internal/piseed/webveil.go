@@ -55,6 +55,13 @@ import (
 // path.
 const DefaultSearxngSocketPath = "/usr/local/searxng/run/socket"
 
+// WebveilPackage is the pi extension source that provides webveil web search. When
+// the seed wires webveil it declares this in the seeded settings.json `packages`
+// so pi materialises the extension on first run (a DECLARATIVE install; the seed
+// never execs `pi install`). Writing the .config/webveil/config.json alone is not
+// enough: without the extension declared, pi has no webveil to read that config.
+const WebveilPackage = "npm:pi-webveil"
+
 // WebveilConfigPath is the home-relative path the pi seed writes webveil's config
 // to: `.config/webveil/config.json`, the XDG default (see the file doc). It is a
 // DIFFERENT subtree than the model files (ModelsFilePath / SettingsFilePath under

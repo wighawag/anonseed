@@ -109,6 +109,40 @@ func TestPiPromptsForEndpointWhenFlagOmitted(t *testing.T) {
 	}
 }
 
+// TestPiWarnsWhenPiAbsent: when the `pi` binary is not on PATH, the handler emits
+// a warning (the seeded config needs pi to run it) but STILL seeds (non-fatal:
+// exit 0, the applier is hit). The warning names pi.
+func TestPiWarnsWhenPiAbsent(t *testing.T) {
+	ctl := &recordingApplier{}
+	h := newTestPiHandler(stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}},
+		[]seed.Target{seed.TargetAnonctl}, []seed.Target{seed.TargetAnonctl}, ctl)
+	h.piPresent = func() bool { return false } // pi NOT on PATH
+	var stdout, stderr bytes.Buffer
+	code := h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (missing pi is a WARNING, not fatal); stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "pi") || !strings.Contains(stderr.String(), "PATH") {
+		t.Errorf("stderr = %q, want a warning that pi is not on PATH", stderr.String())
+	}
+	if len(ctl.got) != 1 {
+		t.Errorf("seed should still apply despite missing pi; applier hit %d times, want 1", len(ctl.got))
+	}
+}
+
+// TestPiNoWarnWhenPiPresent: when pi IS on PATH, no missing-pi warning is emitted.
+func TestPiNoWarnWhenPiPresent(t *testing.T) {
+	ctl := &recordingApplier{}
+	h := newTestPiHandler(stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}},
+		[]seed.Target{seed.TargetAnonctl}, []seed.Target{seed.TargetAnonctl}, ctl)
+	h.piPresent = func() bool { return true }
+	var stdout, stderr bytes.Buffer
+	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
+	if strings.Contains(stderr.String(), "not found on PATH") {
+		t.Errorf("stderr = %q, want NO missing-pi warning when pi is present", stderr.String())
+	}
+}
+
 // TestPiExplicitTargetRoutesToApplier: `--target anonctl` selects that substrate
 // and routes the plan to the anonctl applier (no detection, no prompt).
 func TestPiExplicitTargetRoutesToApplier(t *testing.T) {

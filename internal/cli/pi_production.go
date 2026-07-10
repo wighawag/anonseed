@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,6 +46,16 @@ import (
 // production seam rather than the concrete type.
 func provisionExecRunner() homewrite.Runner { return provision.ExecRunner{} }
 
+// piOnPath is the production pi-presence seam: it reports whether the `pi` binary
+// is reachable on PATH. The seed writes pi's CONFIG, so a missing pi means the
+// seeded identity has nothing to run that config; the handler warns (in red) when
+// this is false. Behind the handler's piPresent seam so tests force present/absent
+// without depending on the host's PATH.
+func piOnPath() bool {
+	_, err := exec.LookPath("pi")
+	return err == nil
+}
+
 // resolvePiSeed is the production pi-seed resolution seam: it runs piseed.Resolve
 // (probe the endpoint's live /v1/models, read the endpoint-matched provider from
 // the user's own ~/.pi/agent/models.json, run the api-key guard) with the real
@@ -52,7 +63,8 @@ func provisionExecRunner() homewrite.Runner { return provision.ExecRunner{} }
 // real apiKey (or any resolution failure) is returned as an error, aborting the
 // seed before any target work. force carries the operator's explicit
 // --force-allow-local-llm-api-key through to the guard.
-func resolvePiSeed(ctx context.Context, endpoint string, force bool, webveil piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
+func resolvePiSeed(ctx context.Context, endpoint string, force bool, webveil piseed.WebveilChoice, stdout, _ io.Writer) (seed.Seed, error) {
+	fmt.Fprintf(stdout, "anonseed pi: probing model endpoint %s ...\n", endpoint)
 	opts, err := piseed.Resolve(ctx, piseed.ResolveInput{
 		Endpoint:       endpoint,
 		Force:          force,
@@ -64,6 +76,19 @@ func resolvePiSeed(ctx context.Context, endpoint string, force bool, webveil pis
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Verbose progress: report what was resolved so the operator sees what the seed
+	// decided (which models, whether webveil got wired and at which socket) rather
+	// than a single silent "seeded" line.
+	fmt.Fprintf(stdout, "anonseed pi: %d model(s) selected (default: %s)\n", len(opts.Models), opts.DefaultModelID)
+	if opts.Webveil != nil {
+		fmt.Fprintf(stdout, "anonseed pi: webveil web search wired at SearXNG socket %s (declaring the %s extension)\n",
+			opts.Webveil.SocketPath, piseed.WebveilPackage)
+	} else if webveil.Disabled {
+		fmt.Fprintln(stdout, "anonseed pi: webveil disabled (--no-webveil); seeding model config only")
+	} else {
+		fmt.Fprintln(stdout, "anonseed pi: no SearXNG detected; webveil not wired (pass --webveil-install-default to wire it anyway)")
 	}
 	return piseed.New(opts), nil
 }

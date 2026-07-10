@@ -198,6 +198,57 @@ func TestPlanWebveilEnabledEmitsConfigNoException(t *testing.T) {
 	}
 }
 
+// TestPlanWebveilEnabledDeclaresPackage: with webveil enabled, the seeded
+// settings.json declares the pi-webveil extension in `packages`, so pi actually
+// materialises webveil on first run (writing config.json alone is not enough).
+func TestPlanWebveilEnabledDeclaresPackage(t *testing.T) {
+	opts := Options{
+		Models:         []Model{{ID: "m"}},
+		DefaultModelID: "m",
+		APIKey:         apikeyguard.PlaceholderAPIKey,
+		Webveil:        &WebveilOptions{SocketPath: "/run/searxng/acct.sock"},
+	}
+	opts.Endpoint = "127.0.0.1:11434"
+	plan, err := opts.Plan(seed.TargetAnonctl)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	var settings string
+	for _, f := range plan.Files {
+		if f.Path == SettingsFilePath {
+			settings = f.Content
+		}
+	}
+	if settings == "" {
+		t.Fatal("settings.json not emitted")
+	}
+	if !strings.Contains(settings, WebveilPackage) {
+		t.Errorf("settings.json must declare %q in packages when webveil is wired:\n%s", WebveilPackage, settings)
+	}
+}
+
+// TestPlanWebveilDisabledOmitsPackage: with webveil off, the seeded settings.json
+// declares NO packages (the `packages` key is omitted entirely), so a model-only
+// seed is byte-identical to before the package field existed.
+func TestPlanWebveilDisabledOmitsPackage(t *testing.T) {
+	opts := Options{
+		Models:         []Model{{ID: "m"}},
+		DefaultModelID: "m",
+		APIKey:         apikeyguard.PlaceholderAPIKey,
+		Webveil:        nil,
+	}
+	opts.Endpoint = "127.0.0.1:11434"
+	plan, err := opts.Plan(seed.TargetAnonctl)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, f := range plan.Files {
+		if f.Path == SettingsFilePath && strings.Contains(f.Content, "packages") {
+			t.Errorf("model-only settings.json must not carry a packages key:\n%s", f.Content)
+		}
+	}
+}
+
 // TestPlanWebveilDisabledOmitsConfig: with webveil nil (the model-only fallback),
 // Plan emits ONLY the two model files and the model exception — no webveil config.
 func TestPlanWebveilDisabledOmitsConfig(t *testing.T) {

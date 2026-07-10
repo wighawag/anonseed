@@ -412,6 +412,12 @@ type ModelSelection struct {
 	DefaultProvider string   `json:"defaultProvider"`
 	DefaultModel    string   `json:"defaultModel"`
 	EnabledModels   []string `json:"enabledModels"`
+
+	// Packages are the pi extension sources the seeded home declares (e.g.
+	// "npm:pi-webveil" when webveil is wired), so pi materialises them on first run.
+	// omitempty: a model-only seed writes no `packages` key at all (unchanged from
+	// before this field existed), so plain model seeds are byte-identical.
+	Packages []string `json:"packages,omitempty"`
 }
 
 // GenerateModelSelection builds the settings.json selection fragment for the
@@ -591,6 +597,14 @@ func (o Options) plan(_ seed.Target) (seed.SeedPlan, error) {
 		ids = append(ids, m.ID)
 	}
 	sel := GenerateModelSelection(ids, o.DefaultModelID)
+	// When webveil is wired, DECLARE the pi-webveil extension in the seeded
+	// settings.json `packages` so pi materialises it on first run. The config file
+	// below is not enough on its own: without the extension declared, pi has no
+	// webveil to read that config. This is a declarative install (no `pi install`
+	// exec). See piseed.WebveilPackage.
+	if o.Webveil != nil {
+		sel.Packages = append(sel.Packages, WebveilPackage)
+	}
 	settingsJSON, err := GenerateSettingsJSON(sel)
 	if err != nil {
 		return seed.SeedPlan{}, fmt.Errorf("piseed: synthesising settings.json: %w", err)
@@ -605,7 +619,7 @@ func (o Options) plan(_ seed.Target) (seed.SeedPlan, error) {
 	// webveil config.json under the XDG subtree (.config/webveil/, NOT under .pi/).
 	// It adds NO Exception: a Unix socket has no IP/port, so anonctl needs no
 	// `--allow` hole for the SearXNG hop. A nil Webveil is the explicit model-only
-	// fallback (no webveil config emitted).
+	// fallback (no webveil config emitted, and no pi-webveil package declared above).
 	if o.Webveil != nil {
 		webveilJSON, err := GenerateWebveilConfig(o.Webveil.SocketPath)
 		if err != nil {

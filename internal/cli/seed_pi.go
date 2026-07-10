@@ -53,6 +53,12 @@ type piHandler struct {
 	// anonctlApply lands a produced plan onto the anonctl substrate (its base dir +
 	// Runner + sub-target). Production wires the real anonctl applier; tests record.
 	anonctlApply target.Applier
+
+	// piPresent reports whether the `pi` binary is reachable (on PATH), so the seed
+	// can WARN loudly (in red) when the seeded config will have no pi to run it.
+	// Production wires an exec.LookPath check; tests force present/absent. It is a
+	// non-fatal check (the config is still seeded), so it returns only a bool.
+	piPresent func() bool
 }
 
 func (piHandler) Summary() string {
@@ -98,6 +104,14 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 
 	ctx := context.Background()
 
+	// pi-presence check: the seed writes pi's CONFIG, but the seeded identity needs
+	// the `pi` binary itself to run it. If pi is not on PATH, WARN loudly (red) so the
+	// operator knows to install it; this is NOT fatal (the config is still worth
+	// seeding, and pi may be installed for the target account by other means).
+	if h.piPresent != nil && !h.piPresent() {
+		redln(stderr, "anonseed pi: WARNING: `pi` was not found on PATH. The seeded config needs pi to run it; install pi (e.g. `npm i -g @earendil-works/pi-coding-agent`) for the target identity.")
+	}
+
 	// The operator's resolved webveil decision (default-on, disable-able): the
 	// disable flag, an explicit socket override, or accepting the install default
 	// when no SearXNG is detected. ResolveWebveil (in the seed's Resolve) applies
@@ -113,7 +127,7 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	// aborts before any target work.
 	s, err := h.resolveSeed(ctx, resolvedEndpoint, *force, webveil, stdout, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "anonseed pi: %v\n", err)
+		redln(stderr, fmt.Sprintf("anonseed pi: %v", err))
 		return 1
 	}
 
@@ -122,7 +136,7 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	// asks the operator (never a silent auto-pick).
 	targets, err := h.resolveTargets(ctx, *targetFlag, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "anonseed pi: %v\n", err)
+		redln(stderr, fmt.Sprintf("anonseed pi: %v", err))
 		return 1
 	}
 	if len(targets) == 0 {
@@ -162,7 +176,7 @@ func reportOutcomes(outcomes []target.Outcome, stdout, stderr io.Writer) int {
 	for _, o := range outcomes {
 		switch {
 		case o.Err != nil:
-			fmt.Fprintf(stderr, "anonseed pi: target %q failed: %v\n", o.Target, o.Err)
+			redln(stderr, fmt.Sprintf("anonseed pi: target %q failed: %v", o.Target, o.Err))
 			code = 1
 		case o.Skipped:
 			fmt.Fprintf(stdout, "anonseed pi: target %q skipped (the pi seed does not support this substrate).\n", o.Target)
@@ -184,6 +198,7 @@ func newPiHandler() piHandler {
 		detector:       target.EnvDetector{},
 		prompt:         interactiveTargetPrompt,
 		endpointPrompt: interactiveEndpointPrompt,
+		piPresent:      piOnPath,
 		anonctlApply:   target.AnonctlDefaultHomeApplier(anonctl.Applier{Runner: provisionExecRunner()}, false),
 	}
 }
