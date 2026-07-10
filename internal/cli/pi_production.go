@@ -28,11 +28,17 @@ import (
 //
 // NOTE on scope: the pi seed's interactive model-PICK here is deliberately a
 // non-interactive "import every discovered model, first as default" default, NOT
-// a rich TUI. The full interactive pick surface (and webveil) belong to the pi
-// seed's own CLI work (tasks pi-seed-model-config already shipped the piseed
-// Resolve/Plan library; pi-seed-webveil-anonctl-socket is still pending); this
+// a rich TUI. The full interactive pick surface belongs to the pi seed's own CLI
+// work (task pi-seed-model-config shipped the piseed Resolve/Plan library); this
 // task owns the --target axis, so it wires piseed.Resolve through a simple pick
 // rather than building the TUI. See the done record's Decisions block.
+//
+// webveil (task pi-seed-webveil-anonctl-socket) IS wired here: resolvePiSeed
+// passes the operator's WebveilChoice + the host SearXNG detection seam
+// (detectHostSearxng) through to piseed.Resolve, so webveil is default-on
+// (disable-able) with the config landed by the target applier alongside the model
+// files. Detection is a cheap host sniff (the uWSGI app ini's `http-socket`), kept
+// behind piseed's DetectSearxngFunc seam so cli/piseed tests never read /etc.
 
 // provisionExecRunner returns the real anoncore Runner for the anonctl applier's
 // chown / passwd steps. Wrapped in a function so the handler wiring names one
@@ -46,13 +52,15 @@ func provisionExecRunner() homewrite.Runner { return provision.ExecRunner{} }
 // real apiKey (or any resolution failure) is returned as an error, aborting the
 // seed before any target work. force carries the operator's explicit
 // --force-allow-local-llm-api-key through to the guard.
-func resolvePiSeed(ctx context.Context, endpoint string, force bool, _, _ io.Writer) (seed.Seed, error) {
+func resolvePiSeed(ctx context.Context, endpoint string, force bool, webveil piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
 	opts, err := piseed.Resolve(ctx, piseed.ResolveInput{
 		Endpoint:       endpoint,
 		Force:          force,
 		Probe:          httpProbe,
 		ReadUserModels: readUserModels,
 		Pick:           importAllPick,
+		DetectSearxng:  detectHostSearxng,
+		Webveil:        webveil,
 	})
 	if err != nil {
 		return nil, err
@@ -105,6 +113,72 @@ func importAllPick(candidates []piseed.Candidate) (piseed.Pick, error) {
 		ids = append(ids, c.ID)
 	}
 	return piseed.Pick{ImportIDs: ids, DefaultID: ids[0]}, nil
+}
+
+// searxngUwsgiIniPaths are the host locations the production SearXNG detector
+// reads to find an install + its socket, in preference order: the enabled uWSGI
+// app symlink first (the served one), then the available definition. Each is the
+// `.ini` whose `http-socket = <path>` line binds the SearXNG socket (see the
+// finding webveil-searxng-unix-socket-contract.md). Presence of the file signals a
+// SearXNG install; the `http-socket` line gives the socket path to wire.
+var searxngUwsgiIniPaths = []string{
+	"/etc/uwsgi/apps-enabled/searxng.ini",
+	"/etc/uwsgi/apps-available/searxng.ini",
+}
+
+// detectHostSearxng is the production SearXNG-detection seam (piseed.DetectSearxngFunc):
+// it reports whether a host SearXNG is installed and the socket its uWSGI app
+// binds, by reading the SearXNG uWSGI app ini's `http-socket = <path>` line. It is
+// a cheap, filesystem-only sniff (no exec, no network), matching the target
+// detector's stance. When no ini is found, SearXNG is reported ABSENT (the seed
+// then takes the disable-or-install-default branch); when found but the socket
+// line is unreadable, it is reported PRESENT with an empty socket path (the
+// resolution falls back to the install default). A read error other than
+// not-found is returned so Resolve can treat it as "not detected" (non-fatal).
+func detectHostSearxng() (piseed.SearxngDetection, error) {
+	for _, path := range searxngUwsgiIniPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return piseed.SearxngDetection{}, err
+		}
+		// Found an install: parse its `http-socket = <path>` (best-effort; an
+		// unreadable socket line still reports Present so the seed defers to the
+		// install default rather than silently disabling webveil).
+		return piseed.SearxngDetection{
+			Present:    true,
+			SocketPath: parseUwsgiHTTPSocket(data),
+		}, nil
+	}
+	return piseed.SearxngDetection{Present: false}, nil
+}
+
+// parseUwsgiHTTPSocket extracts the socket path from a uWSGI ini's
+// `http-socket = <path>` line (the line SearXNG's app config uses to bind its
+// socket). It ignores comments (`#`) and whitespace and returns the first match's
+// value, or "" when no such line is present (the caller falls back to the install
+// default). It is a small line scan, not a full ini parser: only the one key the
+// socket path lives on is needed.
+func parseUwsgiHTTPSocket(data []byte) string {
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(key) != "http-socket" {
+			continue
+		}
+		if v := strings.TrimSpace(value); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // interactiveTargetPrompt is the production detect-then-ask prompt: given the

@@ -493,11 +493,35 @@ type Options struct {
 	// guard upstream (a real key only survives with force); the normal value is
 	// apikeyguard.PlaceholderAPIKey. Plan writes it verbatim.
 	APIKey string
+
+	// Webveil, when non-nil, wires webveil (anonymized web search) by adding a
+	// webveil config.json to the plan (see WebveilOptions). It is RESOLVED upstream
+	// (the interactive half's ResolveWebveil): default-on when a SearXNG is detected
+	// (or the operator confirms the install default), nil when the operator DISABLES
+	// webveil or declines the model-only fallback. A nil Webveil is the explicit
+	// model-only pi (no webveil config emitted); a non-nil one is the default wired
+	// seed. Plan reads only the resolved socket path from it.
+	Webveil *WebveilOptions
+}
+
+// WebveilOptions is the pi seed's resolved webveil wiring: the SearXNG socket the
+// seeded webveil points at. It is present (non-nil on Options) only when webveil
+// is ENABLED; its absence is the explicit model-only fallback. It carries the
+// already-resolved socket path (the shared install default, or a detected/
+// per-account instance's socket); Plan reads it verbatim to synthesise the
+// webveil config.json. It carries no enable flag: presence IS enablement.
+type WebveilOptions struct {
+	// SocketPath is the SearXNG uWSGI Unix-domain-socket path the seeded webveil
+	// baseUrl points at (as `unix:<SocketPath>`). Empty means the install default
+	// (DefaultSearxngSocketPath), so a bare enable still yields a valid config.
+	SocketPath string
 }
 
 // Seed is the pi seed type. It applies to the anonctl substrate today (the
-// anonbox substrate is a future task; a socket-wired webveil extension is a
-// separate task). It CARRIES its already-resolved pi Options (built UPSTREAM by
+// anonbox substrate is a future task). On the anonctl substrate it emits the
+// model files, the model's --allow exception, AND (default-on, disable-able) a
+// webveil config.json pointed at a SearXNG over a Unix socket (see webveil.go).
+// It CARRIES its already-resolved pi Options (built UPSTREAM by
 // Resolve, the interactive half): the seed.Seed interface's Plan takes only the
 // minimal seed.Options, but the pi seed's picks (which models, the default, the
 // guarded apiKey) do not fit there, so the seam is a resolved-options-bearing
@@ -523,9 +547,9 @@ func New(opts Options) Seed {
 // Name is the seed-type name, matching the `anonseed pi` subcommand.
 func (Seed) Name() string { return "pi" }
 
-// Targets lists the substrates the pi seed applies to. Today only anonctl; the
-// anonbox applier is deferred (a separate task) and webveil-via-socket is a
-// separate extension task, so the model-config half declares anonctl.
+// Targets lists the substrates the pi seed applies to. Today only anonctl (the
+// anonbox applier is deferred, a separate task); on anonctl the plan carries the
+// model files plus the default-on webveil config.
 func (Seed) Targets() []seed.Target { return []seed.Target{seed.TargetAnonctl} }
 
 // Plan synthesises the pi seed's SeedPlan for target: a models.json (one
@@ -572,11 +596,26 @@ func (o Options) plan(_ seed.Target) (seed.SeedPlan, error) {
 		return seed.SeedPlan{}, fmt.Errorf("piseed: synthesising settings.json: %w", err)
 	}
 
+	files := []seed.FileToWrite{
+		{Path: ModelsFilePath, Content: string(modelsJSON)},
+		{Path: SettingsFilePath, Content: string(settingsJSON)},
+	}
+
+	// webveil (default-on, disable-able): when enabled (Webveil non-nil), add the
+	// webveil config.json under the XDG subtree (.config/webveil/, NOT under .pi/).
+	// It adds NO Exception: a Unix socket has no IP/port, so anonctl needs no
+	// `--allow` hole for the SearXNG hop. A nil Webveil is the explicit model-only
+	// fallback (no webveil config emitted).
+	if o.Webveil != nil {
+		webveilJSON, err := GenerateWebveilConfig(o.Webveil.SocketPath)
+		if err != nil {
+			return seed.SeedPlan{}, fmt.Errorf("piseed: synthesising webveil config.json: %w", err)
+		}
+		files = append(files, seed.FileToWrite{Path: WebveilConfigPath, Content: string(webveilJSON)})
+	}
+
 	return seed.SeedPlan{
-		Files: []seed.FileToWrite{
-			{Path: ModelsFilePath, Content: string(modelsJSON)},
-			{Path: SettingsFilePath, Content: string(settingsJSON)},
-		},
+		Files: files,
 		Exceptions: []seed.Exception{
 			{
 				Allow:  hostPortKey(endpoint),

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/wighawag/anonseed/internal/apikeyguard"
+	"github.com/wighawag/anonseed/internal/seed"
 )
 
 // fakeModelsServer stands up a real HTTP server serving a /v1/models body, so the
@@ -299,5 +300,145 @@ func TestResolveRejectsBadInputs(t *testing.T) {
 	}
 	if _, err := Resolve(context.Background(), ResolveInput{Endpoint: "127.0.0.1:1"}); err == nil {
 		t.Errorf("missing seams should error")
+	}
+}
+
+// --- webveil wiring through the interactive Resolve (default-on, disable-able) ---
+
+// detectSearxngAt returns a DetectSearxngFunc reporting a present SearXNG at the
+// given socket (the detection seam; tests inject a fixture, never read /etc).
+func detectSearxngAt(socket string) DetectSearxngFunc {
+	return func() (SearxngDetection, error) {
+		return SearxngDetection{Present: true, SocketPath: socket}, nil
+	}
+}
+
+// TestResolveWiresWebveilByDefaultWhenDetected: a detected SearXNG wires webveil
+// (default-on) at the detected socket, and the resulting Plan carries the webveil
+// config.json with the socket/direct/direct shape and NO extra --allow exception.
+func TestResolveWiresWebveilByDefaultWhenDetected(t *testing.T) {
+	endpoint := fakeModelsServer(t, `{"data":[{"id":"m"}]}`)
+	opts, err := Resolve(context.Background(), ResolveInput{
+		Endpoint:       endpoint,
+		Probe:          httpProbe,
+		ReadUserModels: func() ([]byte, error) { return nil, nil },
+		Pick:           pickAll,
+		DetectSearxng:  detectSearxngAt("/run/searxng/acct.sock"),
+		// zero WebveilChoice: default-on.
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if opts.Webveil == nil {
+		t.Fatal("webveil should be wired by default when a SearXNG is detected")
+	}
+	if opts.Webveil.SocketPath != "/run/searxng/acct.sock" {
+		t.Errorf("webveil socket = %q, want the detected path", opts.Webveil.SocketPath)
+	}
+
+	plan, err := opts.Plan(seed.TargetAnonctl)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	var cfg string
+	for _, f := range plan.Files {
+		if f.Path == WebveilConfigPath {
+			cfg = f.Content
+		}
+	}
+	if cfg == "" {
+		t.Fatalf("no webveil config in plan files: %+v", plan.Files)
+	}
+	for _, want := range []string{`"backend": "searxng"`, `"baseUrl": "unix:/run/searxng/acct.sock"`, `"egress"`, `"fetchEgress"`} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("webveil config missing %q:\n%s", want, cfg)
+		}
+	}
+	// webveil adds no exception: only the model endpoint is exempted.
+	if len(plan.Exceptions) != 1 || plan.Exceptions[0].Allow != endpoint {
+		t.Errorf("exceptions = %+v, want only the model endpoint", plan.Exceptions)
+	}
+}
+
+// TestResolveDisableFlagSuppressesWebveil: --no-webveil (Disabled) yields the
+// model-only Options even with a SearXNG detected.
+func TestResolveDisableFlagSuppressesWebveil(t *testing.T) {
+	endpoint := fakeModelsServer(t, `{"data":[{"id":"m"}]}`)
+	opts, err := Resolve(context.Background(), ResolveInput{
+		Endpoint:       endpoint,
+		Probe:          httpProbe,
+		ReadUserModels: func() ([]byte, error) { return nil, nil },
+		Pick:           pickAll,
+		DetectSearxng:  detectSearxngAt("/run/x.sock"),
+		Webveil:        WebveilChoice{Disabled: true},
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if opts.Webveil != nil {
+		t.Errorf("the disable flag should suppress webveil, got %+v", opts.Webveil)
+	}
+}
+
+// TestResolveAbsentSearxngModelOnlyFallback: no SearXNG detected and the operator
+// does not accept the install default -> the EXPLICIT model-only fallback (no
+// webveil), never silent.
+func TestResolveAbsentSearxngModelOnlyFallback(t *testing.T) {
+	endpoint := fakeModelsServer(t, `{"data":[{"id":"m"}]}`)
+	absent := func() (SearxngDetection, error) { return SearxngDetection{Present: false}, nil }
+	opts, err := Resolve(context.Background(), ResolveInput{
+		Endpoint:       endpoint,
+		Probe:          httpProbe,
+		ReadUserModels: func() ([]byte, error) { return nil, nil },
+		Pick:           pickAll,
+		DetectSearxng:  absent,
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if opts.Webveil != nil {
+		t.Errorf("absent SearXNG + declined should be model-only, got %+v", opts.Webveil)
+	}
+}
+
+// TestResolveDetectionErrorNonFatal: a detection error is treated as "not
+// detected" (non-fatal), so the seed still resolves (model-only), never aborting.
+func TestResolveDetectionErrorNonFatal(t *testing.T) {
+	endpoint := fakeModelsServer(t, `{"data":[{"id":"m"}]}`)
+	failDetect := func() (SearxngDetection, error) {
+		return SearxngDetection{}, errors.New("cannot read /etc/uwsgi")
+	}
+	opts, err := Resolve(context.Background(), ResolveInput{
+		Endpoint:       endpoint,
+		Probe:          httpProbe,
+		ReadUserModels: func() ([]byte, error) { return nil, nil },
+		Pick:           pickAll,
+		DetectSearxng:  failDetect,
+	})
+	if err != nil {
+		t.Fatalf("a detection error must be non-fatal: %v", err)
+	}
+	if opts.Webveil != nil {
+		t.Errorf("a detection error should behave as absent (model-only), got %+v", opts.Webveil)
+	}
+}
+
+// TestResolveWebveilOverrideBeatsDetection: an explicit socket override wires
+// webveil at that socket even when detection reports a different one.
+func TestResolveWebveilOverrideBeatsDetection(t *testing.T) {
+	endpoint := fakeModelsServer(t, `{"data":[{"id":"m"}]}`)
+	opts, err := Resolve(context.Background(), ResolveInput{
+		Endpoint:       endpoint,
+		Probe:          httpProbe,
+		ReadUserModels: func() ([]byte, error) { return nil, nil },
+		Pick:           pickAll,
+		DetectSearxng:  detectSearxngAt("/run/detected.sock"),
+		Webveil:        WebveilChoice{SocketPathOverride: "/run/chosen.sock"},
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if opts.Webveil == nil || opts.Webveil.SocketPath != "/run/chosen.sock" {
+		t.Errorf("override should wire the chosen socket, got %+v", opts.Webveil)
 	}
 }

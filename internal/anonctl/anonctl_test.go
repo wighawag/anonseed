@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/wighawag/anonseed/internal/anonctl"
+	"github.com/wighawag/anonseed/internal/apikeyguard"
+	"github.com/wighawag/anonseed/internal/piseed"
 	"github.com/wighawag/anonseed/internal/seed"
 )
 
@@ -112,6 +114,59 @@ func TestApplyDefaultHome(t *testing.T) {
 		if c[0] != "chown" || c[1] != "anon:anon" {
 			t.Errorf("unexpected Runner call %v, want a chown to anon:anon", c)
 		}
+	}
+}
+
+// TestApplyDefaultHomeLandsWebveilConfig is the end-to-end webveil landing check:
+// a REAL pi seed plan with webveil enabled lands its webveil config.json under the
+// home's .config/webveil/ subtree (NOT under .pi/), through the same safe-write
+// surface, and merges ONLY the model endpoint into defaults.json (webveil's socket
+// needs no --allow). Everything is under a TEMP base dir: the real
+// ~/.config/webveil/config.json is never touched.
+func TestApplyDefaultHomeLandsWebveilConfig(t *testing.T) {
+	base := t.TempDir()
+	r := &fakeRunner{}
+	a := anonctl.Applier{BaseDir: base, Runner: r}
+
+	// A real resolved pi seed with webveil wired at a per-account socket.
+	opts := piseed.Options{
+		Models:         []piseed.Model{{ID: "llama3"}},
+		DefaultModelID: "llama3",
+		APIKey:         apikeyguard.PlaceholderAPIKey,
+		Webveil:        &piseed.WebveilOptions{SocketPath: "/run/searxng/acct.sock"},
+	}
+	opts.Endpoint = "127.0.0.1:11434"
+	plan, err := opts.Plan(seed.TargetAnonctl)
+	if err != nil {
+		t.Fatalf("pi Plan: %v", err)
+	}
+
+	if _, err := a.ApplyDefaultHome(context.Background(), plan, false); err != nil {
+		t.Fatalf("ApplyDefaultHome: %v", err)
+	}
+
+	home := filepath.Join(base, "default-home")
+	// The webveil config landed at the XDG subtree, NOT under .pi/.
+	webveilCfg, err := os.ReadFile(filepath.Join(home, ".config/webveil/config.json"))
+	if err != nil {
+		t.Fatalf("webveil config not landed under .config/webveil/: %v", err)
+	}
+	for _, want := range []string{`"backend": "searxng"`, `"baseUrl": "unix:/run/searxng/acct.sock"`, `"egress"`, `"fetchEgress"`} {
+		if !strings.Contains(string(webveilCfg), want) {
+			t.Errorf("landed webveil config missing %q:\n%s", want, webveilCfg)
+		}
+	}
+	// The model files still land under .pi/agent/ (a different subtree).
+	if _, err := os.Stat(filepath.Join(home, ".pi/agent/models.json")); err != nil {
+		t.Errorf("models.json missing under .pi/agent/: %v", err)
+	}
+	// No webveil config leaked under .pi/.
+	if _, err := os.Stat(filepath.Join(home, ".pi/webveil")); err == nil {
+		t.Error("webveil config must NOT be under .pi/")
+	}
+	// defaults.json carries ONLY the model endpoint (webveil socket needs no --allow).
+	if allow := readAllow(t, base); len(allow) != 1 || allow[0] != "127.0.0.1:11434" {
+		t.Errorf("allow = %v, want only the model endpoint [127.0.0.1:11434] (no socket exemption)", allow)
 	}
 }
 

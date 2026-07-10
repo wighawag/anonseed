@@ -69,6 +69,22 @@ type ResolveInput struct {
 	Probe          ProbeFunc
 	ReadUserModels ReadUserModelsFunc
 	Pick           PickFunc
+
+	// DetectSearxng is the SearXNG-detection seam for the default-on webveil wiring
+	// (production sniffs the host; tests inject a fixture). It is OPTIONAL: a nil
+	// DetectSearxng means "no detection", equivalent to SearXNG absent, so a caller
+	// that does not wire webveil (e.g. a model-only path) can leave it unset. A
+	// detection error is treated as "not detected" (non-fatal), so a probe of the
+	// host never aborts the seed.
+	DetectSearxng DetectSearxngFunc
+
+	// Webveil is the operator's resolved webveil decision (the disable flag /
+	// socket override / accept-install-default choice). It is applied through
+	// ResolveWebveil against DetectSearxng's result: webveil is default-ON, so the
+	// zero WebveilChoice with a detected SearXNG wires webveil, and Webveil.Disabled
+	// is the one way to turn it off. When SearXNG is absent and the operator did not
+	// accept the install default, the result is the explicit model-only fallback.
+	Webveil WebveilChoice
 }
 
 // Resolve is the pi seed's interactive UPSTREAM step: it probes the endpoint's
@@ -135,6 +151,19 @@ func Resolve(ctx context.Context, in ResolveInput) (Options, error) {
 		serverIDs = parseModelsListing(body)
 	}
 
+	// webveil (default-on, disable-able): detect a host SearXNG (non-fatal on
+	// error / when the seam is unset -> absent) and apply the operator's decision
+	// tree. The result is *WebveilOptions on Options: non-nil wires webveil at the
+	// resolved socket, nil is the explicit model-only fallback (Webveil.Disabled or
+	// no SearXNG + not accepting the install default).
+	var detection SearxngDetection
+	if in.DetectSearxng != nil {
+		if d, derr := in.DetectSearxng(); derr == nil {
+			detection = d
+		}
+	}
+	webveil := ResolveWebveil(detection, in.Webveil)
+
 	candidates := mergeModelSources(hostModels, serverIDs)
 
 	pick, err := in.Pick(candidates)
@@ -151,6 +180,7 @@ func Resolve(ctx context.Context, in ResolveInput) (Options, error) {
 		Models:         models,
 		DefaultModelID: strings.TrimSpace(pick.DefaultID),
 		APIKey:         seededKey,
+		Webveil:        webveil,
 	}
 	opts.Endpoint = endpoint
 	return opts, nil
