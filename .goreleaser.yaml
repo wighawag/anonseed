@@ -1,0 +1,76 @@
+# goreleaser config for anonseed: Linux-only binaries (anonseed seeds config into
+# anonctl's host state under /etc/anonctl and self-elevates for the root-owned
+# write, primitives that only make sense on the Linux host anonctl runs on),
+# static (CGO disabled) covering amd64, arm64, and 32-bit ARM v7/v6 so older
+# Raspberry Pi models are covered (Pi 1 / Zero = armv6, Pi 2 / 3 32-bit = armv7,
+# Pi 3/4/5 64-bit = arm64). Mirrors the sibling anonctl's proven setup, adapted
+# for anonseed's SINGLE binary (a config seeder, no shim).
+version: 2
+
+project_name: anonseed
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: anonseed
+    main: .
+    binary: anonseed
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # Stamp the version with the release tag (e.g. v0.1.0 -> 0.1.0). The version
+      # var lives in internal/cli (not main), so the -X path targets it there. When
+      # absent (a plain go build / go install), internal/cli.version stays "dev".
+      - -s -w -X github.com/wighawag/anonseed/internal/cli.version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      # 32-bit ARM variants for older Raspberry Pi models.
+      - "7" # Pi 2, Pi 3 (32-bit OS)
+      - "6" # Pi 1, Pi Zero / Zero W
+
+archives:
+  - id: anonseed
+    ids:
+      - anonseed
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_
+      {{- .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - README.md
+      - LICENSE
+      - docs/adr/*.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  draft: false
+  prerelease: auto
+  # Upload the installer as a standalone release asset, so it is served from
+  # stable release object storage (no raw.githubusercontent branch-cache lag):
+  #   curl -fsSL https://github.com/wighawag/anonseed/releases/latest/download/install.sh | sudo sh
+  extra_files:
+    - glob: ./install.sh
