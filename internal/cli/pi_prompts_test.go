@@ -125,6 +125,11 @@ func TestSearxngAbsentProceed(t *testing.T) {
 	if !strings.Contains(out.String(), searxngInstallURL) {
 		t.Errorf("prompt should point at the install guide %q; got %q", searxngInstallURL, out.String())
 	}
+	// The guidance must steer to a BARE-METAL install (the seed needs a host uWSGI
+	// socket), explicitly NOT Docker.
+	if !strings.Contains(out.String(), "NOT Docker") {
+		t.Errorf("prompt should warn against a Docker install; got %q", out.String())
+	}
 }
 
 // TestSearxngAbsentInstallDefault: not detected + [i]nstall-default -> Present with

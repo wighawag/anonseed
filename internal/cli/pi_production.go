@@ -214,7 +214,12 @@ func detectHostSearxng() (piseed.SearxngDetection, error) {
 }
 
 // searxngInstallURL is the SearXNG install guide the not-found prompt points at.
-const searxngInstallURL = "https://docs.searxng.org/admin/installation.html"
+// It targets the BARE-METAL (uWSGI) step-by-step install, NOT the generic index
+// (which also offers Docker). anonseed detects SearXNG by reading the host uWSGI
+// app ini's `http-socket` and wires webveil over that Unix SOCKET, so a Docker /
+// container install is NOT usable here: it exposes no host uWSGI socket to detect
+// or bind. The bare install is the one that produces the socket this seed needs.
+const searxngInstallURL = "https://docs.searxng.org/admin/installation-searxng.html"
 
 // interactiveSearxngDetect wraps the raw host detector with the not-found UX: when
 // SearXNG is NOT detected (and webveil is neither disabled nor pointed at an
@@ -262,7 +267,8 @@ func searxngDetectFrom(in io.Reader, out io.Writer, detect func() (piseed.Searxn
 	reader := bufio.NewReader(in)
 	for {
 		fmt.Fprintln(out, "No SearXNG detected on this host; webveil web search needs one.")
-		fmt.Fprintf(out, "Install SearXNG: %s\n", searxngInstallURL)
+		fmt.Fprintln(out, "Install SearXNG BARE-METAL (uWSGI), NOT Docker: the seed wires webveil over a host Unix socket, which a container does not expose.")
+		fmt.Fprintf(out, "Guide: %s\n", searxngInstallURL)
 		fmt.Fprintf(out, "[p]roceed without webveil, [r]echeck after installing, [i]nstall-default (wire anyway, you'll provide one) [p]: ")
 
 		line, rerr := reader.ReadString('\n')
