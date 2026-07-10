@@ -30,9 +30,15 @@ type registry map[string]Handler
 // defaultRegistry returns the built-in seed types. Adding a new built-in seed
 // is a one-line registration here (plus its handler). Unknown names are handled
 // by the caller (the reserved PATH-plugin seam), NOT by this map.
-func defaultRegistry() registry {
+//
+// It is a package var (not a plain func) so cli dispatch tests can inject a fake
+// handler and exercise the dispatch + self-elevation seams WITHOUT the pi
+// handler's real impure edges (a live endpoint probe, a real prompt on stdin, a
+// real /etc/anonctl write). The original is restored on cleanup. Production
+// leaves it untouched, wiring the real built-in seeds.
+var defaultRegistry = func() registry {
 	return registry{
-		"pi": piStub{},
+		"pi": newPiHandler(),
 	}
 }
 

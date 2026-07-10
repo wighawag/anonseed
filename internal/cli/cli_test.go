@@ -10,6 +10,38 @@ import (
 	"github.com/wighawag/anonseed/internal/elevate"
 )
 
+// fakeHandler is a trivial in-test seed handler used to exercise the CLI dispatch
+// + self-elevation seams WITHOUT the real pi handler's impure edges (a live
+// endpoint probe, a stdin prompt, an /etc/anonctl write). It echoes a marker to
+// stdout and returns a fixed code, and records the args it was handed.
+type fakeHandler struct {
+	code    int
+	marker  string
+	gotArgs *[]string
+}
+
+func (h fakeHandler) Summary() string { return "fake seed for dispatch tests" }
+
+func (h fakeHandler) Run(args []string, stdout, _ io.Writer) int {
+	if h.gotArgs != nil {
+		*h.gotArgs = append([]string(nil), args...)
+	}
+	if h.marker != "" {
+		io.WriteString(stdout, h.marker)
+	}
+	return h.code
+}
+
+// stubRegistry replaces the CLI's built-in registry with a single fake `pi`
+// handler, so dispatch tests route to a controllable handler rather than the real
+// pi seed. The original is restored on cleanup.
+func stubRegistry(t *testing.T, h Handler) {
+	t.Helper()
+	orig := defaultRegistry
+	defaultRegistry = func() registry { return registry{"pi": h} }
+	t.Cleanup(func() { defaultRegistry = orig })
+}
+
 // stubElevate replaces the CLI's self-elevation seam with a fixed Decision so seed
 // dispatch is exercised WITHOUT a real sudo/root re-exec. It also records the argv
 // the gate was asked to elevate, so tests can assert argv is forwarded exactly.
@@ -37,16 +69,16 @@ func TestRunDispatch(t *testing.T) {
 		wantStderrIn string // substring expected on stderr ("" == no check)
 	}{
 		{
-			name:         "known seed pi routes to its stub",
+			name:         "known seed pi routes to its handler",
 			args:         []string{"pi"},
 			wantCode:     0,
-			wantStdoutIn: "anonseed pi",
+			wantStdoutIn: "FAKE-PI",
 		},
 		{
 			name:         "known seed pi forwards its own args",
 			args:         []string{"pi", "--endpoint", "127.0.0.1:1234"},
 			wantCode:     0,
-			wantStdoutIn: "not yet implemented",
+			wantStdoutIn: "FAKE-PI",
 		},
 		{
 			name:         "unknown seed fails loudly and lists seeds",
@@ -85,6 +117,9 @@ func TestRunDispatch(t *testing.T) {
 			// Neutralise the self-elevation gate so a seed dispatch runs its handler
 			// in-process (as if already privileged); the gate itself is covered below.
 			stubElevate(t, elevate.Decision{AlreadyPrivileged: true})
+			// Route `pi` to a controllable fake so dispatch is tested without the real
+			// pi handler's impure edges.
+			stubRegistry(t, fakeHandler{code: 0, marker: "FAKE-PI"})
 			var stdout, stderr bytes.Buffer
 			got := Run(tc.args, &stdout, &stderr)
 
@@ -121,6 +156,7 @@ func TestUnknownSeedListsAvailable(t *testing.T) {
 // identical command.
 func TestSeedDispatchSelfElevates(t *testing.T) {
 	gotArgv := stubElevate(t, elevate.Decision{AlreadyPrivileged: true})
+	stubRegistry(t, fakeHandler{code: 0, marker: "FAKE-PI"})
 	var stdout, stderr bytes.Buffer
 	Run([]string{"pi", "--target", "anonctl"}, &stdout, &stderr)
 
