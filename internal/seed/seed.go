@@ -58,10 +58,19 @@ type FileToWrite struct {
 // endpoint it must reach directly while all other egress stays forced through
 // the proxy (e.g. its LAN/loopback model server). A socket-wired service needs
 // none, so a SeedPlan may carry zero Exceptions.
+//
+// This is the DECLARATIVE plan carrier (a raw string + reason). Its VALIDATED
+// counterpart is allowguard.Exception (internal/allowguard), the parsed,
+// guardrail-checked value: a seed applier runs allowguard.Parse on the raw Allow
+// string below and lands the value on success. The two share anonseed's word
+// "Exception" deliberately, split only by layer (intent here vs validated value
+// there). See docs/adr/0002 for the pre-check-vs-authoritative layering.
 type Exception struct {
 	// Allow is the `IP:port` endpoint to allow directly (the value that lands in
-	// anonctl's `"allow"` list). Validation against anonctl's --allow guardrail
-	// is the applier's job; this type only declares intent.
+	// anonctl's `"allow"` list). This carrier holds it RAW; the fail-fast
+	// pre-validation is allowguard.Parse (internal/allowguard) and the
+	// AUTHORITATIVE check is anonctl's apply-time --allow guardrail. This type
+	// only declares intent.
 	Allow string `json:"allow"`
 
 	// Reason is a short human-readable note for why this hole is needed, so a
