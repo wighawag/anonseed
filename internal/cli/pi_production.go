@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,8 +71,8 @@ func resolvePiSeed(ctx context.Context, endpoint string, force bool, webveil pis
 		Force:          force,
 		Probe:          httpProbe,
 		ReadUserModels: readUserModels,
-		Pick:           importAllPick,
-		DetectSearxng:  detectHostSearxng,
+		Pick:           interactiveDefaultPick,
+		DetectSearxng:  interactiveSearxngDetect(webveil),
 		Webveil:        webveil,
 	})
 	if err != nil {
@@ -125,11 +126,20 @@ func readUserModels() ([]byte, error) {
 	return os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
 }
 
-// importAllPick is the non-interactive default pick: import EVERY discovered
-// candidate, with the first (candidates are ID-sorted) as the default. A rich
-// interactive pick is deferred to the pi seed's own CLI surface (see the file
-// doc); this keeps the --target-axis wiring functional without a TUI.
-func importAllPick(candidates []piseed.Candidate) (piseed.Pick, error) {
+// interactiveDefaultPick is the production model pick: it imports EVERY discovered
+// candidate (the seed always wires every endpoint-served model) but ASKS the
+// operator WHICH is the default rather than auto-picking the first. The prompt is
+// skipped when there is nothing to choose: 0 candidates (model-only, no pick) or 1
+// candidate (it is trivially the default). For 2+ it lists them numbered and reads
+// a 1-based choice on stdin, defaulting to the first (ID-sorted) on an empty line.
+func interactiveDefaultPick(candidates []piseed.Candidate) (piseed.Pick, error) {
+	return defaultPickFrom(os.Stdin, os.Stderr, candidates)
+}
+
+// defaultPickFrom is interactiveDefaultPick's testable core: it reads the choice
+// from in and writes the prompt to out, so a test drives it with a string reader
+// and a buffer (no real stdin/stderr). See interactiveDefaultPick for behaviour.
+func defaultPickFrom(in io.Reader, out io.Writer, candidates []piseed.Candidate) (piseed.Pick, error) {
 	if len(candidates) == 0 {
 		return piseed.Pick{}, nil
 	}
@@ -137,7 +147,30 @@ func importAllPick(candidates []piseed.Candidate) (piseed.Pick, error) {
 	for _, c := range candidates {
 		ids = append(ids, c.ID)
 	}
-	return piseed.Pick{ImportIDs: ids, DefaultID: ids[0]}, nil
+	if len(ids) == 1 {
+		return piseed.Pick{ImportIDs: ids, DefaultID: ids[0]}, nil
+	}
+
+	fmt.Fprintln(out, "Models to import (all are wired); choose the DEFAULT:")
+	for i, id := range ids {
+		fmt.Fprintf(out, "  %d) %s\n", i+1, id)
+	}
+	fmt.Fprintf(out, "Default model [1-%d] (empty = 1, %s): ", len(ids), ids[0])
+
+	reader := bufio.NewReader(in)
+	line, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(line) == "" {
+		return piseed.Pick{}, err
+	}
+	choice := strings.TrimSpace(line)
+	if choice == "" {
+		return piseed.Pick{ImportIDs: ids, DefaultID: ids[0]}, nil
+	}
+	n, err := strconv.Atoi(choice)
+	if err != nil || n < 1 || n > len(ids) {
+		return piseed.Pick{}, fmt.Errorf("invalid default-model choice %q (want a number 1-%d)", choice, len(ids))
+	}
+	return piseed.Pick{ImportIDs: ids, DefaultID: ids[n-1]}, nil
 }
 
 // searxngUwsgiIniPaths are the host locations the production SearXNG detector
@@ -178,6 +211,95 @@ func detectHostSearxng() (piseed.SearxngDetection, error) {
 		}, nil
 	}
 	return piseed.SearxngDetection{Present: false}, nil
+}
+
+// searxngInstallURL is the SearXNG install guide the not-found prompt points at.
+const searxngInstallURL = "https://docs.searxng.org/admin/installation.html"
+
+// interactiveSearxngDetect wraps the raw host detector with the not-found UX: when
+// SearXNG is NOT detected (and webveil is neither disabled nor pointed at an
+// explicit socket, in which cases the answer is already settled), it ASKS the
+// operator what to do rather than silently disabling webveil. It points at the
+// install guide and offers a RECHECK so the operator can install SearXNG in
+// another shell and continue without restarting the seed.
+//
+// The three choices map onto the SearxngDetection the pure ResolveWebveil then
+// consumes:
+//   - [p]roceed: return absent -> webveil disabled (the model-only fallback).
+//   - [r]echeck: re-run the raw detector and loop (the operator just installed it).
+//   - [i]nstall-default: return Present with the install-default socket, so
+//     ResolveWebveil wires webveil there (the operator will provide a SearXNG at
+//     that socket) -- equivalent to --webveil-install-default.
+//
+// It short-circuits (no prompt) when the operator already settled webveil via a
+// flag: Disabled or a SocketPathOverride both bypass detection in ResolveWebveil,
+// and a successful detection needs no prompt either.
+func interactiveSearxngDetect(choice piseed.WebveilChoice) piseed.DetectSearxngFunc {
+	return func() (piseed.SearxngDetection, error) {
+		return searxngDetectFrom(os.Stdin, os.Stderr, detectHostSearxng, choice)
+	}
+}
+
+// searxngDetectFrom is interactiveSearxngDetect's testable core: it runs the given
+// detect seam and, on an absent-and-unsettled result, drives the not-found prompt
+// loop reading from in / writing to out. A test injects a scripted reader, a
+// buffer, and a fake detect (present/absent, with a recheck that flips to
+// present), so the whole decision tree runs without a real host or real stdin.
+func searxngDetectFrom(in io.Reader, out io.Writer, detect func() (piseed.SearxngDetection, error), choice piseed.WebveilChoice) (piseed.SearxngDetection, error) {
+	det, err := detect()
+	if err != nil {
+		det = piseed.SearxngDetection{Present: false}
+	}
+	// Already-settled cases skip the prompt: a detected SearXNG, an explicit
+	// disable, an explicit socket override, or the flag that pre-accepts the
+	// install default. Only an ABSENT SearXNG with no such flag reaches the prompt.
+	if det.Present || choice.Disabled ||
+		strings.TrimSpace(choice.SocketPathOverride) != "" ||
+		choice.AcceptInstallDefaultWhenAbsent {
+		return det, nil
+	}
+
+	reader := bufio.NewReader(in)
+	for {
+		fmt.Fprintln(out, "No SearXNG detected on this host; webveil web search needs one.")
+		fmt.Fprintf(out, "Install SearXNG: %s\n", searxngInstallURL)
+		fmt.Fprintf(out, "[p]roceed without webveil, [r]echeck after installing, [i]nstall-default (wire anyway, you'll provide one) [p]: ")
+
+		line, rerr := reader.ReadString('\n')
+		ans := strings.ToLower(strings.TrimSpace(line))
+		if rerr != nil && ans == "" {
+			// No input available (EOF/non-interactive): take the safe default (proceed
+			// without webveil) rather than blocking.
+			return piseed.SearxngDetection{Present: false}, nil
+		}
+		switch ans {
+		case "", "p", "proceed":
+			return piseed.SearxngDetection{Present: false}, nil
+		case "i", "install-default":
+			// Wire at the install default: report Present with an empty socket so
+			// ResolveWebveil uses DefaultSearxngSocketPath.
+			return piseed.SearxngDetection{Present: true}, nil
+		case "r", "recheck":
+			if redet, derr := detect(); derr == nil && redet.Present {
+				fmt.Fprintf(out, "SearXNG now detected%s.\n", socketSuffix(redet.SocketPath))
+				return redet, nil
+			}
+			fmt.Fprintln(out, "Still no SearXNG detected.")
+			continue
+		default:
+			fmt.Fprintf(out, "Unrecognised choice %q.\n", ans)
+			continue
+		}
+	}
+}
+
+// socketSuffix renders a " at <path>" clause for a non-empty socket path, or "" so
+// the recheck confirmation reads naturally when the path is unknown.
+func socketSuffix(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	return " at " + path
 }
 
 // parseUwsgiHTTPSocket extracts the socket path from a uWSGI ini's
