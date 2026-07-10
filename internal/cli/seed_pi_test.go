@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wighawag/anonseed/internal/piseed"
 	"github.com/wighawag/anonseed/internal/seed"
 	"github.com/wighawag/anonseed/internal/target"
 )
@@ -45,7 +46,7 @@ func (r *recordingApplier) apply(_ context.Context, plan seed.SeedPlan) error {
 // real endpoint, box, or /etc/anonctl is touched.
 func newTestPiHandler(s seed.Seed, present, chosen []seed.Target, ctl *recordingApplier) piHandler {
 	return piHandler{
-		resolveSeed: func(_ context.Context, _ string, _ bool, _, _ io.Writer) (seed.Seed, error) {
+		resolveSeed: func(_ context.Context, _ string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
 			return s, nil
 		},
 		detector:     target.DetectorFunc(func(context.Context) []seed.Target { return present }),
@@ -74,7 +75,7 @@ func TestPiExplicitTargetRoutesToApplier(t *testing.T) {
 	ctl := &recordingApplier{}
 	promptCalled := false
 	h := piHandler{
-		resolveSeed: func(_ context.Context, _ string, _ bool, _, _ io.Writer) (seed.Seed, error) {
+		resolveSeed: func(_ context.Context, _ string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
 			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
 		},
 		detector: target.DetectorFunc(func(context.Context) []seed.Target {
@@ -170,7 +171,7 @@ func TestPiMultiTargetFansOut(t *testing.T) {
 func TestPiUnsupportedTargetSkippedCleanly(t *testing.T) {
 	ctl := &recordingApplier{}
 	h := piHandler{
-		resolveSeed: func(_ context.Context, _ string, _ bool, _, _ io.Writer) (seed.Seed, error) {
+		resolveSeed: func(_ context.Context, _ string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
 			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil // NOT anonbox
 		},
 		detector: target.DetectorFunc(func(context.Context) []seed.Target {
@@ -216,12 +217,61 @@ func TestPiNoTargetChosen(t *testing.T) {
 	}
 }
 
+// TestPiWebveilFlagsThreadToResolve: the webveil disable + socket-override flags
+// are parsed and threaded into the resolveSeed seam as a WebveilChoice, so the
+// default-on-disable-able decision reaches the seed's Resolve.
+func TestPiWebveilFlagsThreadToResolve(t *testing.T) {
+	var gotChoice piseed.WebveilChoice
+	h := piHandler{
+		resolveSeed: func(_ context.Context, _ string, _ bool, webveil piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
+			gotChoice = webveil
+			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
+		},
+		detector:     target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
+		prompt:       func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		anonctlApply: (&recordingApplier{}).apply,
+	}
+	var stdout, stderr bytes.Buffer
+	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl",
+		"--no-webveil", "--searxng-socket", "/run/x.sock", "--webveil-install-default"}, &stdout, &stderr)
+	if !gotChoice.Disabled {
+		t.Error("--no-webveil should set WebveilChoice.Disabled")
+	}
+	if gotChoice.SocketPathOverride != "/run/x.sock" {
+		t.Errorf("--searxng-socket = %q, want /run/x.sock", gotChoice.SocketPathOverride)
+	}
+	if !gotChoice.AcceptInstallDefaultWhenAbsent {
+		t.Error("--webveil-install-default should set AcceptInstallDefaultWhenAbsent")
+	}
+}
+
+// TestPiWebveilDefaultOnChoice: with NO webveil flags, the resolved choice is the
+// zero WebveilChoice (default-on: not disabled, no override), so the seed wires
+// webveil when a SearXNG is detected.
+func TestPiWebveilDefaultOnChoice(t *testing.T) {
+	var gotChoice piseed.WebveilChoice
+	h := piHandler{
+		resolveSeed: func(_ context.Context, _ string, _ bool, webveil piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
+			gotChoice = webveil
+			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
+		},
+		detector:     target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
+		prompt:       func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		anonctlApply: (&recordingApplier{}).apply,
+	}
+	var stdout, stderr bytes.Buffer
+	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
+	if gotChoice.Disabled || gotChoice.SocketPathOverride != "" || gotChoice.AcceptInstallDefaultWhenAbsent {
+		t.Errorf("no webveil flags should be the zero (default-on) choice, got %+v", gotChoice)
+	}
+}
+
 // TestPiSeedResolutionFailureAborts: a seed-resolution error (e.g. a refused real
 // apiKey) aborts before any target work, with a non-zero exit.
 func TestPiSeedResolutionFailureAborts(t *testing.T) {
 	ctl := &recordingApplier{}
 	h := piHandler{
-		resolveSeed: func(_ context.Context, _ string, _ bool, _, _ io.Writer) (seed.Seed, error) {
+		resolveSeed: func(_ context.Context, _ string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
 			return nil, errors.New("matched provider apiKey refused")
 		},
 		detector: target.DetectorFunc(func(context.Context) []seed.Target {

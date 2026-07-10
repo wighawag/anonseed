@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/wighawag/anonseed/internal/anonctl"
+	"github.com/wighawag/anonseed/internal/piseed"
 	"github.com/wighawag/anonseed/internal/seed"
 	"github.com/wighawag/anonseed/internal/target"
 )
@@ -28,9 +29,11 @@ import (
 // or a real /etc/anonctl write.
 type piHandler struct {
 	// resolveSeed builds the pi seed.Seed from the parsed flags (the interactive
-	// probe/pick + the api-key guard live in piseed.Resolve, behind this seam).
-	// Production wires resolvePiSeed; cli tests inject a fake seed.
-	resolveSeed func(ctx context.Context, endpoint string, force bool, stdout, stderr io.Writer) (seed.Seed, error)
+	// probe/pick + the api-key guard + the default-on webveil wiring live in
+	// piseed.Resolve, behind this seam). webveil carries the operator's webveil
+	// decision (disable flag / socket override); production wires resolvePiSeed, cli
+	// tests inject a fake seed.
+	resolveSeed func(ctx context.Context, endpoint string, force bool, webveil piseed.WebveilChoice, stdout, stderr io.Writer) (seed.Seed, error)
 
 	// detector reports the present substrates for the default (no --target) path.
 	// Production wires target.EnvDetector; tests fake present/absent.
@@ -60,6 +63,11 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 		targetFlag = fs.String("target", "", "substrate to seed into {anonctl,anonbox}; empty detects present substrates and asks")
 		endpoint   = fs.String("endpoint", "", "the local model endpoint host:port the seeded pi reaches directly")
 		force      = fs.Bool("force-allow-local-llm-api-key", false, "seed a real-looking apiKey anyway (normally refused; a local model ignores its key)")
+		// webveil is default-ON (an agent that cannot search is crippled); these
+		// flags are the disable + socket-override knobs of the seed-time decision tree.
+		noWebveil        = fs.Bool("no-webveil", false, "do NOT wire webveil web search (default: wired when a SearXNG is detected)")
+		searxngSocket    = fs.String("searxng-socket", "", "SearXNG Unix socket path to point webveil at (overrides detection; implies webveil on)")
+		webveilNoSearxng = fs.Bool("webveil-install-default", false, "wire webveil at the install-default socket even when no SearXNG is detected (you will provide one)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2 // flag package already printed the error to stderr.
@@ -71,9 +79,20 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 
 	ctx := context.Background()
 
-	// UPSTREAM: resolve the pi seed (interactive probe/pick + api-key guard). A
-	// resolution failure (e.g. a refused real apiKey) aborts before any target work.
-	s, err := h.resolveSeed(ctx, *endpoint, *force, stdout, stderr)
+	// The operator's resolved webveil decision (default-on, disable-able): the
+	// disable flag, an explicit socket override, or accepting the install default
+	// when no SearXNG is detected. ResolveWebveil (in the seed's Resolve) applies
+	// this against host detection.
+	webveil := piseed.WebveilChoice{
+		Disabled:                       *noWebveil,
+		SocketPathOverride:             strings.TrimSpace(*searxngSocket),
+		AcceptInstallDefaultWhenAbsent: *webveilNoSearxng,
+	}
+
+	// UPSTREAM: resolve the pi seed (interactive probe/pick + api-key guard +
+	// default-on webveil wiring). A resolution failure (e.g. a refused real apiKey)
+	// aborts before any target work.
+	s, err := h.resolveSeed(ctx, *endpoint, *force, webveil, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "anonseed pi: %v\n", err)
 		return 1
