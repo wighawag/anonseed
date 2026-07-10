@@ -62,8 +62,16 @@ type Identity struct {
 	Home string
 
 	// Account is the Unix account name (anoncore's account vocabulary) that owns
-	// the seeded paths. For the box-wide default-home this is the default `anon`
-	// account; for a named account it is account.ResolveAccount(name).
+	// the seeded paths, or EMPTY for a root-owned write with NO account chown.
+	//
+	// A named account is the second sub-target: a specific already-provisioned
+	// anon account's home, chowned to that account (which MUST exist). An EMPTY
+	// Account is the box-wide default-home TEMPLATE: it is a root-owned skeleton
+	// under /etc/anonctl/default-home/ that anonctl's own `add` later copies INTO a
+	// fresh account's home (doing the per-account chown at that point, mirroring
+	// anonctl's documented `sudo cp -r <src>/. /etc/anonctl/default-home/`). Seeding
+	// the template must NOT require the `anon` account to exist, so an empty Account
+	// skips the chown entirely. See ResolveDefaultHome / ResolveAccountHome.
 	Account string
 }
 
@@ -75,8 +83,13 @@ type Identity struct {
 // surface never hardcodes a system path.
 func ResolveDefaultHome(baseDir string) Identity {
 	return Identity{
-		Home:    filepath.Join(baseDir, defaultHomeDir),
-		Account: account.DefaultAccount,
+		Home: filepath.Join(baseDir, defaultHomeDir),
+		// EMPTY account: the default-home is a TEMPLATE, not a live account home. It is
+		// written root-owned (no account chown), exactly as anonctl populates it with a
+		// plain root `cp -r`; anonctl's `add` does the per-account chown when it copies
+		// this template into a fresh account's home. Seeding it must therefore NOT
+		// require the `anon` account to exist on the box.
+		Account: "",
 	}
 }
 
@@ -118,7 +131,37 @@ func Write(ctx context.Context, r Runner, id Identity, files []seed.FileToWrite,
 		return seedhome.Result{}, err
 	}
 
-	return seedhome.Seed(ctx, r, tmpl, id.Home, id.Account, force)
+	// A named account is chowned to; an EMPTY account is a root-owned template write
+	// (the box-wide default-home), so the chown is suppressed. seedhome always issues
+	// a `chown <account>:<account>` per path, so for the template case we pass a
+	// Runner that drops the chown while leaving every OTHER seedhome guarantee (atomic
+	// collision check, setuid/sticky strip, symlink refusal, mode-700) intact. This is
+	// what lets `anonseed pi` seed the default-home on a box where `anon` does not yet
+	// exist. seedhome's `account` arg is then irrelevant (its only use is the chown we
+	// drop), so "root" is passed purely as a non-empty placeholder for its messages.
+	runner, account := r, id.Account
+	if account == "" {
+		runner = noChownRunner{r}
+		account = "root"
+	}
+
+	return seedhome.Seed(ctx, runner, tmpl, id.Home, account, force)
+}
+
+// noChownRunner wraps a Runner and DROPS `chown` invocations (returning success
+// without executing them), forwarding everything else. It is how Write does a
+// root-owned template seed: seedhome unconditionally chowns each seeded path, but
+// the default-home template must stay root-owned and must not require any account
+// to exist. Only the chown is suppressed; seedhome's copy, collision, setuid-strip
+// and symlink guarantees are untouched (they are pure filesystem work in
+// seedhome, not Runner calls).
+type noChownRunner struct{ inner Runner }
+
+func (n noChownRunner) Run(ctx context.Context, name string, args ...string) (string, string, error) {
+	if name == "chown" {
+		return "", "", nil
+	}
+	return n.inner.Run(ctx, name, args...)
 }
 
 // materialise writes each file's content into the template dir at its

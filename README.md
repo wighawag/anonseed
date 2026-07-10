@@ -38,7 +38,7 @@ anonseed self-elevates for the root-owned `/etc/anonctl` write, so it re-execs u
 
 ### The `pi` seed
 
-Given the local model endpoint's `host:port`, the `pi` seed probes the endpoint's live `/v1/models`, reads the endpoint-matched provider from your own `~/.pi/agent/models.json`, and synthesizes a `models.json` + `settings.json` into the target home's `~/.pi/agent/`, declaring the `--allow` exception for that endpoint. It refuses to seed a real-looking API key into an anonymized home (a jailed identity carrying the operator's credentials still authenticates as the operator); pass `--force-allow-local-llm-api-key` to override. It also wires webveil (SearXNG) web search by default (`--no-webveil` to disable).
+Given the local model endpoint's `host:port` (via `--endpoint`, or asked interactively if omitted), the `pi` seed probes the endpoint's live `/v1/models`, reads the endpoint-matched provider from your own `~/.pi/agent/models.json`, and synthesizes a `models.json` + `settings.json` into the target home's `~/.pi/agent/`, declaring the `--allow` exception for that endpoint. It refuses to seed a real-looking API key into an anonymized home (a jailed identity carrying the operator's credentials still authenticates as the operator); pass `--force-allow-local-llm-api-key` to override. It also wires webveil (SearXNG) web search by default (`--no-webveil` to disable).
 
 The substrate is chosen with `--target {anonctl,anonbox}`; with no `--target`, anonseed detects the present substrates and asks which to seed.
 

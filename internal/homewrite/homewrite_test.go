@@ -190,8 +190,11 @@ func TestWritePlantedSetuidIsStripped(t *testing.T) {
 }
 
 // TestResolveDefaultHome covers the FIRST sub-target: the box-wide default-home
-// template under the (caller-supplied, temp) base dir, owned by the default anon
-// account. No real /etc/anonctl is touched: the base dir is a temp path.
+// TEMPLATE under the (caller-supplied, temp) base dir. It is root-owned (an EMPTY
+// Account), NOT chowned to `anon`: the template is a skeleton anonctl's `add`
+// later copies into a fresh account's home (doing the per-account chown then), so
+// seeding it must not require the `anon` account to exist. No real /etc/anonctl is
+// touched: the base dir is a temp path.
 func TestResolveDefaultHome(t *testing.T) {
 	base := t.TempDir()
 	id := homewrite.ResolveDefaultHome(base)
@@ -199,8 +202,38 @@ func TestResolveDefaultHome(t *testing.T) {
 	if id.Home != wantHome {
 		t.Errorf("Home = %q, want %q", id.Home, wantHome)
 	}
-	if id.Account != "anon" {
-		t.Errorf("Account = %q, want anon (the default account)", id.Account)
+	if id.Account != "" {
+		t.Errorf("Account = %q, want \"\" (a root-owned template, NO account chown)", id.Account)
+	}
+}
+
+// TestWriteEmptyAccountSkipsChown is the fix's core guarantee: an EMPTY-account
+// identity (the default-home template) lands its files WITHOUT any chown, so it
+// works on a box where the `anon` account does not yet exist. The files still land
+// (with seedhome's setuid-strip / collision guarantees), only the chown is
+// suppressed.
+func TestWriteEmptyAccountSkipsChown(t *testing.T) {
+	home := t.TempDir()
+	files := []seed.FileToWrite{{Path: ".pi/agent/models.json", Content: `{"providers":[]}`}}
+	r := &fakeRunner{}
+
+	res, err := homewrite.Write(context.Background(), r, homewrite.Identity{Home: home, Account: ""}, files, false)
+	if err != nil {
+		t.Fatalf("Write (empty account): %v", err)
+	}
+	if res.Copied != 1 {
+		t.Errorf("Copied = %d, want 1", res.Copied)
+	}
+	if got, err := os.ReadFile(filepath.Join(home, ".pi/agent/models.json")); err != nil || string(got) != `{"providers":[]}` {
+		t.Errorf("models.json = %q, err %v", got, err)
+	}
+	// The load-bearing assertion: NO chown ran (a root-owned template write must not
+	// require any account to exist, the exact bug that broke `anonseed pi` on a box
+	// with no `anon` user).
+	for _, call := range r.calls {
+		if call[0] == "chown" {
+			t.Errorf("a chown ran for an empty-account (root-owned template) write: %v", call)
+		}
 	}
 }
 

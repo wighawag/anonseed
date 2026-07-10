@@ -106,13 +106,12 @@ func TestApplyDefaultHome(t *testing.T) {
 	if len(res.AllowAdded) != 1 || res.AllowAdded[0] != "127.0.0.1:11434" {
 		t.Errorf("AllowAdded = %v, want [127.0.0.1:11434]", res.AllowAdded)
 	}
-	// The chown targeted the default anon account, through the Runner seam.
-	if len(r.calls) == 0 {
-		t.Fatal("expected chown calls through the Runner seam, got none")
-	}
+	// The default-home is a root-owned TEMPLATE: NO chown runs (anonctl's `add` does
+	// the per-account chown when it later copies this template into a fresh account's
+	// home). This is the fix for `anonseed pi` failing on a box with no `anon` user.
 	for _, c := range r.calls {
-		if c[0] != "chown" || c[1] != "anon:anon" {
-			t.Errorf("unexpected Runner call %v, want a chown to anon:anon", c)
+		if c[0] == "chown" {
+			t.Errorf("a chown ran for the root-owned default-home template: %v", c)
 		}
 	}
 }

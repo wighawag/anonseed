@@ -181,6 +181,21 @@ func parseUwsgiHTTPSocket(data []byte) string {
 	return ""
 }
 
+// interactiveEndpointPrompt is the production endpoint prompt: it asks the operator
+// (on stdin) for the local model endpoint host:port when --endpoint was omitted, so
+// the pi seed is usable interactively. It reads one line and returns it trimmed;
+// the handler treats an empty answer as a usage error. Behind the handler's
+// endpointPrompt seam, so cli tests script the answer without real stdin.
+func interactiveEndpointPrompt() (string, error) {
+	fmt.Fprintf(os.Stderr, "Local model endpoint (host:port) the seeded pi reaches directly: ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(line) == "" {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
 // interactiveTargetPrompt is the production detect-then-ask prompt: given the
 // substrates detected PRESENT, it asks the operator (on stdin) which to seed, so
 // the default path NEVER silently auto-picks. It reads a comma-separated choice

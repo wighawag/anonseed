@@ -49,23 +49,63 @@ func newTestPiHandler(s seed.Seed, present, chosen []seed.Target, ctl *recording
 		resolveSeed: func(_ context.Context, _ string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
 			return s, nil
 		},
-		detector:     target.DetectorFunc(func(context.Context) []seed.Target { return present }),
-		prompt:       func([]seed.Target) ([]seed.Target, error) { return chosen, nil },
-		anonctlApply: ctl.apply,
+		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return present }),
+		prompt:         func([]seed.Target) ([]seed.Target, error) { return chosen, nil },
+		endpointPrompt: failEndpointPrompt,
+		anonctlApply:   ctl.apply,
 	}
 }
 
-// TestPiRequiresEndpoint: the pi handler refuses without --endpoint (a usage
-// error), before any target work.
-func TestPiRequiresEndpoint(t *testing.T) {
+// failEndpointPrompt is the default endpoint prompt for tests that pass --endpoint
+// on argv: reaching it means the flag path was wrongly bypassed, so it is a test
+// failure rather than a silent empty answer. Tests that DO exercise the prompt set
+// their own endpointPrompt.
+var failEndpointPrompt = func() (string, error) {
+	return "", errors.New("endpointPrompt reached though --endpoint was supplied")
+}
+
+// TestPiEmptyEndpointAfterPromptIsUsageError: with no --endpoint AND an empty
+// answer from the prompt, the handler refuses (a usage error), before any target
+// work. There is nothing to wire without an endpoint.
+func TestPiEmptyEndpointAfterPromptIsUsageError(t *testing.T) {
 	h := newTestPiHandler(stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil, nil, &recordingApplier{})
+	h.endpointPrompt = func() (string, error) { return "  ", nil } // whitespace-only == empty
 	var stdout, stderr bytes.Buffer
 	code := h.Run(nil, &stdout, &stderr)
 	if code != 2 {
-		t.Errorf("exit code = %d, want 2 (missing --endpoint)", code)
+		t.Errorf("exit code = %d, want 2 (empty endpoint after prompt)", code)
 	}
 	if !strings.Contains(stderr.String(), "endpoint") {
-		t.Errorf("stderr = %q, want it to mention --endpoint", stderr.String())
+		t.Errorf("stderr = %q, want it to mention the endpoint", stderr.String())
+	}
+}
+
+// TestPiPromptsForEndpointWhenFlagOmitted: with no --endpoint flag, the handler
+// ASKS via the endpointPrompt seam and threads the answer through to the seed
+// resolution + the seed options, so an interactive run (no flag) seeds the same as
+// `--endpoint`.
+func TestPiPromptsForEndpointWhenFlagOmitted(t *testing.T) {
+	ctl := &recordingApplier{}
+	var gotEndpoint string
+	h := piHandler{
+		resolveSeed: func(_ context.Context, endpoint string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
+			gotEndpoint = endpoint
+			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
+		},
+		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
+		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		endpointPrompt: func() (string, error) { return "192.168.1.150:8080", nil },
+		anonctlApply:   ctl.apply,
+	}
+	// No --endpoint on argv: the prompt must supply it. --target anonctl to keep the
+	// path deterministic (no detection/prompt for the substrate axis).
+	var stdout, stderr bytes.Buffer
+	code := h.Run([]string{"--target", "anonctl"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if gotEndpoint != "192.168.1.150:8080" {
+		t.Errorf("resolved endpoint = %q, want the prompted 192.168.1.150:8080", gotEndpoint)
 	}
 }
 
@@ -82,8 +122,9 @@ func TestPiExplicitTargetRoutesToApplier(t *testing.T) {
 			t.Error("detection ran for an explicit --target; it must be bypassed")
 			return nil
 		}),
-		prompt:       func([]seed.Target) ([]seed.Target, error) { promptCalled = true; return nil, nil },
-		anonctlApply: ctl.apply,
+		prompt:         func([]seed.Target) ([]seed.Target, error) { promptCalled = true; return nil, nil },
+		endpointPrompt: failEndpointPrompt,
+		anonctlApply:   ctl.apply,
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -177,8 +218,9 @@ func TestPiUnsupportedTargetSkippedCleanly(t *testing.T) {
 		detector: target.DetectorFunc(func(context.Context) []seed.Target {
 			return []seed.Target{seed.TargetAnonbox}
 		}),
-		prompt:       func(p []seed.Target) ([]seed.Target, error) { return p, nil },
-		anonctlApply: ctl.apply,
+		prompt:         func(p []seed.Target) ([]seed.Target, error) { return p, nil },
+		endpointPrompt: failEndpointPrompt,
+		anonctlApply:   ctl.apply,
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -227,9 +269,10 @@ func TestPiWebveilFlagsThreadToResolve(t *testing.T) {
 			gotChoice = webveil
 			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
 		},
-		detector:     target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
-		prompt:       func([]seed.Target) ([]seed.Target, error) { return nil, nil },
-		anonctlApply: (&recordingApplier{}).apply,
+		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
+		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		endpointPrompt: failEndpointPrompt,
+		anonctlApply:   (&recordingApplier{}).apply,
 	}
 	var stdout, stderr bytes.Buffer
 	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl",
@@ -255,9 +298,10 @@ func TestPiWebveilDefaultOnChoice(t *testing.T) {
 			gotChoice = webveil
 			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
 		},
-		detector:     target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
-		prompt:       func([]seed.Target) ([]seed.Target, error) { return nil, nil },
-		anonctlApply: (&recordingApplier{}).apply,
+		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
+		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		endpointPrompt: failEndpointPrompt,
+		anonctlApply:   (&recordingApplier{}).apply,
 	}
 	var stdout, stderr bytes.Buffer
 	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
@@ -278,8 +322,9 @@ func TestPiSeedResolutionFailureAborts(t *testing.T) {
 			t.Error("detection ran despite a seed-resolution failure; it must abort first")
 			return nil
 		}),
-		prompt:       func([]seed.Target) ([]seed.Target, error) { return nil, nil },
-		anonctlApply: ctl.apply,
+		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		endpointPrompt: failEndpointPrompt,
+		anonctlApply:   ctl.apply,
 	}
 	var stdout, stderr bytes.Buffer
 	code := h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)

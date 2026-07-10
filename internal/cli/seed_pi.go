@@ -43,6 +43,13 @@ type piHandler struct {
 	// interactivity). Production wires an interactive prompt; tests script it.
 	prompt target.Prompt
 
+	// endpointPrompt asks the operator for the local model endpoint host:port when
+	// --endpoint is omitted, so the seed is usable interactively (not only with the
+	// flag). Production wires an interactive stdin prompt; tests script it. Behind a
+	// seam for the same reason as prompt: the handler stays drivable without real
+	// stdin.
+	endpointPrompt func() (string, error)
+
 	// anonctlApply lands a produced plan onto the anonctl substrate (its base dir +
 	// Runner + sub-target). Production wires the real anonctl applier; tests record.
 	anonctlApply target.Applier
@@ -61,7 +68,7 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var (
 		targetFlag = fs.String("target", "", "substrate to seed into {anonctl,anonbox}; empty detects present substrates and asks")
-		endpoint   = fs.String("endpoint", "", "the local model endpoint host:port the seeded pi reaches directly")
+		endpoint   = fs.String("endpoint", "", "the local model endpoint host:port the seeded pi reaches directly (asked interactively if omitted)")
 		force      = fs.Bool("force-allow-local-llm-api-key", false, "seed a real-looking apiKey anyway (normally refused; a local model ignores its key)")
 		// webveil is default-ON (an agent that cannot search is crippled); these
 		// flags are the disable + socket-override knobs of the seed-time decision tree.
@@ -72,8 +79,20 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2 // flag package already printed the error to stderr.
 	}
-	if strings.TrimSpace(*endpoint) == "" {
-		fmt.Fprintln(stderr, "anonseed pi: --endpoint host:port is required (the local model endpoint to wire).")
+	// Resolve the endpoint: the --endpoint flag if given, else ASK the operator (so
+	// the seed is usable interactively, not only via the flag). An empty answer after
+	// the prompt is still a usage error (there is nothing to wire without an endpoint).
+	resolvedEndpoint := strings.TrimSpace(*endpoint)
+	if resolvedEndpoint == "" {
+		answer, err := h.endpointPrompt()
+		if err != nil {
+			fmt.Fprintf(stderr, "anonseed pi: reading --endpoint: %v\n", err)
+			return 2
+		}
+		resolvedEndpoint = strings.TrimSpace(answer)
+	}
+	if resolvedEndpoint == "" {
+		fmt.Fprintln(stderr, "anonseed pi: an endpoint host:port is required (the local model endpoint to wire); pass --endpoint or answer the prompt.")
 		return 2
 	}
 
@@ -92,7 +111,7 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	// UPSTREAM: resolve the pi seed (interactive probe/pick + api-key guard +
 	// default-on webveil wiring). A resolution failure (e.g. a refused real apiKey)
 	// aborts before any target work.
-	s, err := h.resolveSeed(ctx, *endpoint, *force, webveil, stdout, stderr)
+	s, err := h.resolveSeed(ctx, resolvedEndpoint, *force, webveil, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "anonseed pi: %v\n", err)
 		return 1
@@ -114,7 +133,7 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	// Fan out: drive the seed against each target through the driver (which skips a
 	// target the seed does not declare) and route each plan into its applier.
 	appliers := target.DefaultAppliers(h.anonctlApply)
-	outcomes := target.Run(ctx, s, seed.Options{Endpoint: *endpoint}, targets, appliers)
+	outcomes := target.Run(ctx, s, seed.Options{Endpoint: resolvedEndpoint}, targets, appliers)
 
 	return reportOutcomes(outcomes, stdout, stderr)
 }
@@ -161,9 +180,10 @@ func reportOutcomes(outcomes []target.Outcome, stdout, stderr io.Writer) int {
 // stays seam-injectable for tests.
 func newPiHandler() piHandler {
 	return piHandler{
-		resolveSeed:  resolvePiSeed,
-		detector:     target.EnvDetector{},
-		prompt:       interactiveTargetPrompt,
-		anonctlApply: target.AnonctlDefaultHomeApplier(anonctl.Applier{Runner: provisionExecRunner()}, false),
+		resolveSeed:    resolvePiSeed,
+		detector:       target.EnvDetector{},
+		prompt:         interactiveTargetPrompt,
+		endpointPrompt: interactiveEndpointPrompt,
+		anonctlApply:   target.AnonctlDefaultHomeApplier(anonctl.Applier{Runner: provisionExecRunner()}, false),
 	}
 }
