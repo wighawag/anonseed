@@ -1,0 +1,6 @@
+{
+	"verify": "gofmt -l . && go vet ./... && go build ./... && go test ./...",
+	"harness": "pi",
+	"autoBuild": false,
+	"autoTask": false
+}

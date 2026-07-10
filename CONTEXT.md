@@ -1,0 +1,38 @@
+# CONTEXT — anonseed domain language
+
+The domain glossary for `anonseed`. Agents and skills use THIS vocabulary when naming modules, tests, and discussing the system. Architectural rationale lives in `docs/adr/` (decisions); product framing lives in `work/prds/`.
+
+## What anonseed is
+
+anonseed is a Go CLI that seeds the configuration a local-service-using tool needs into an anonymized identity, and declares the one direct-egress IP exception that tool needs (e.g. a LAN/loopback model server), so the tool is ready to run anonymized. It is a config-seeding tool, NOT an account provisioner and NOT a runtime launcher. It ships built-in seed types as subcommands (the first is `pi`) and targets anonctl's box-wide defaults today (`/etc/anonctl/default-home/` + `/etc/anonctl/defaults.json`), with anonbox as a future target. It is the generalization of the sibling tool anon-pi's provisioning half (anon-pi, a pi-specific launcher, is being retired). Part of the anonctl / netcage / anonbox / anoncore family (run-together naming, no hyphen, anchored on the published name anonctl).
+
+## Core domain terms
+
+- **seed type** — a named unit of tool-specific config knowledge (the first is `pi`, invoked `anonseed pi ...`). Small by design: it declares which config files to write, how to probe/merge the tool's live config, and which direct-egress `--allow` exception(s) the tool needs (possibly zero, for a socket-wired service). The machinery around it (resolve the target, safely write into a home via anoncore seedhome, declare the `--allow` exception(s), enforce the api-key guard) is shared across all seed types.
+- **built-in seed** — a seed type shipped in the anonseed binary as a plain subcommand (`pi`, and later `opencode` etc.). Contrast with the RESERVED PATH-plugin escape hatch.
+- **PATH-plugin (reserved)** — a git/kubectl-style fallback where `anonseed foo`, when `foo` is not a built-in, execs a PATH executable `anonseed-foo`. Designed for but NOT built in v1 (speculative until a third-party seed exists).
+- **target identity / default-home** — the anonymized identity anonseed seeds into. For the anonctl target this is a home directory on the host; the tool's config files land under it (e.g. `~/.pi/agent/`).
+- **anonctl target** — anonseed writes into anonctl's already-shipped box-wide defaults: `/etc/anonctl/default-home/` (the seed template every fresh anon account's home is populated from) and `/etc/anonctl/defaults.json` (its `"allow"` list). Two sub-targets: the box-wide default-home, OR a specific already-provisioned anon account's home. No container image is involved (unlike the netcage/anonbox model). Buildable now against anonctl's shipped hooks.
+- **anonbox target (future)** — when anonbox exists, anonseed does the same home / exception seeding AND additionally provides or stages the container image that has the tool installed (the image-based substrate netcage/anonbox use). Stubbable / deferred initially since anonbox does not exist yet.
+- **allow exception** — a direct-egress `IP:port` hole a seeded tool needs (e.g. its LAN/loopback model server), declared so that endpoint is reachable directly while all other egress stays forced through the proxy. For the anonctl target this is written into `/etc/anonctl/defaults.json`'s `"allow"` list (the flag/key is `--allow` / `"allow"`, aligned with netcage; a `:port` is mandatory, loopback `127.0.0.1:<port>` accepted via a stricter guardrail). A Unix-socket-wired service needs NO exemption (no IP/port; never leaves the host).
+- **API-key credential guard** — a load-bearing safety constraint anonseed OWNS: never seed a real-looking credential (API key/token) into an anonymized home, because a jailed identity carrying the operator's credentials still authenticates AS the operator (it stops the IP leak while staying identity-linked, defeating the point). A genuinely local model ignores its apiKey, so a placeholder is fine; a real one is refused loudly unless an explicit force flag is passed. Mirrors anon-pi's `apiKeyLooksReal`. DISTINCT from anoncore seedhome's file-level credential-shedding below.
+- **seedhome (anoncore)** — the shared file-level credential-shedding home seeder, imported from `github.com/wighawag/anoncore/seedhome` (anoncore v0.1.0, published; anonctl's latest imports it). `seedhome.Seed(...)` strips setuid/setgid/sticky bits, refuses symlinks, writes mode-700, and treats a collision as a loud error unless forced. anonseed imports it (does NOT vendor), so this hardening cannot drift from anonctl's.
+- **anoncore (published, v0.1.0)** — the shared, substrate-agnostic account/seed/marker/elevation core for the anon* family (a library, no binary). anonseed imports `seedhome`, `account`, `endpoint`, `marker` as needed. Its README explicitly names anonseed as a planned consumer.
+- **the pi seed** — the first built-in seed. Given the local model endpoint's `host:port`, it probes the endpoint's live `/v1/models` AND reads the provider in the user's own `~/.pi/agent/models.json` whose baseUrl matches that endpoint; the user picks which models to import and the default; it generates a `models.json` (one provider, api `openai-completions`, baseUrl the endpoint, apiKey a placeholder) and a `settings.json` (defaultProvider / defaultModel / enabledModels) into the target home's `~/.pi/agent/`, and declares the `--allow` exception for that endpoint. Only the provider served by the matched endpoint is read, so no other provider or key can enter the seed. It ALSO wires webveil (SearXNG) by DEFAULT (disable-able) — the one deliberate extension exception (see webveil, below).
+- **webveil (SearXNG search)** — the pi seed wires anonymized web search by default (an agent that cannot search is crippled; no new leak since SearXNG runs locally and anonctl forces egress). Provided per-substrate: on anonbox from the staged image (already running); on anonctl over a per-account Unix SOCKET (no `--allow` needed — a socket has no IP/port), the seed detecting an existing host SearXNG and wiring the shared socket (B0/A) or an install-detected per-account instance (B1/B2). The per-account SearXNG SERVICE is supervised by anonctl/anoncore (the same `@`-template-unit pattern as anonctl's shim), NOT by anonseed. Design record: `work/notes/ideas/searxng-socket-wired-seed.md`.
+- **target substrate** — which substrate a seed delivers into (`anonctl` now, `anonbox` later). ORTHOGONAL to seed type: one command per seed (`anonseed pi`), substrate chosen via `--target {anonctl,anonbox}` (default: interactively detect which are present and ask; may seed several applicable targets). A seed declares its `Targets()`; it need not support both.
+- **anonctl** — sibling (published): forces one Unix account's egress through a socks5h/Tor endpoint at the kernel via nftables, per-UID, fail-closed; ships a `verify` leak-test. Owns the `/etc/anonctl` host state anonseed writes to.
+- **netcage** — sibling (published): confines a container's egress through a socks5h proxy by network namespace, fail-closed; ships a `verify` leak-test.
+- **anonbox (planned)** — a netcage-backed machine manager replicating anonctl's verb API (a machine = a dedicated host account + an assigned netcage container + a persistent home).
+
+
+## Conventions
+
+Standing per-change rules agents must follow in this repo.
+
+<!-- No standing per-change rule set yet (no changeset / CHANGELOG / news-fragment convention). Add yours here, or delete this section. For enforcement, wire your own check into the `.dorfl.json` `verify` gate. -->
+
+## Skills this repo uses
+
+- Required: `setup` (onboarding/migration), `to-spec`, `to-task`.
+- Recommended: `review`, `grill-me`.
