@@ -17,9 +17,31 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
+
+	"github.com/wighawag/anonseed/internal/elevate"
 )
+
+// ensureElevated is the self-elevation seam, injectable so cli tests drive seed
+// dispatch WITHOUT a real sudo/root re-exec. It is called once a seed subcommand
+// is dispatched (every built-in seed writes host state under /etc/anonctl, a
+// root-owned path), BEFORE the handler runs: a non-root invocation re-execs the
+// SAME argv elevated (mirroring anonctl), and elevation-unavailable is a loud
+// failure surfaced here (never a silent skip or a partial write). Production wires
+// elevate.Ensure; the elevate package holds the decision + argv-construction seam.
+//
+// The gate is at seed dispatch (not after --target parsing) because every built-in
+// seed targets anonctl today and so needs root; the --target axis is a separate
+// task. The loop-guard sentinel makes this safe: the elevated child re-enters Run
+// with ANONSEED_ELEVATED set, so it does NOT re-elevate and proceeds to the handler
+// as root. See work/notes/observations/self-elevation-decisions.md + docs/adr/0003.
+var ensureElevated = func(argv []string, stderr io.Writer) elevate.Decision {
+	return elevate.Ensure(context.Background(), argv, func(msg string) {
+		fmt.Fprintln(stderr, msg)
+	})
+}
 
 // version is the anonseed version string reported by `--version`.
 //
@@ -68,6 +90,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		printSeeds(stderr, reg)
 		fmt.Fprintf(stderr, "\nRun 'anonseed --help' for usage.\n")
 		return 2
+	}
+
+	// A recognised seed writes host state under /etc/anonctl (root-owned), so it is
+	// a root-requiring step: self-elevate rather than print a "run as root" hint.
+	// Ensure re-execs the SAME argv elevated if we are not root; if it re-exec'd we
+	// return the child's exit code and do NOT run the handler again in this process;
+	// if elevation is unavailable we fail LOUD here, before any write.
+	switch dec := ensureElevated(args, stderr); {
+	case dec.Err != nil:
+		fmt.Fprintf(stderr, "anonseed: %v\n", dec.Err)
+		return 1
+	case dec.Reexeced:
+		return dec.ExitCode
+		// dec.AlreadyPrivileged: fall through and run the handler in-process.
 	}
 
 	return handler.Run(rest, stdout, stderr)
