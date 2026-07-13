@@ -50,9 +50,22 @@ type piHandler struct {
 	// stdin.
 	endpointPrompt func() (string, error)
 
-	// anonctlApply lands a produced plan onto the anonctl substrate (its base dir +
-	// Runner + sub-target). Production wires the real anonctl applier; tests record.
-	anonctlApply target.Applier
+	// overwritePrompt asks the operator, ON a create-only collision, whether to
+	// overwrite the colliding files (listing them). It is consulted only when the
+	// seed would clobber existing files AND --overwrite was not passed, so the
+	// default stays create-only but the operator can say yes interactively instead
+	// of hitting a dead-end error. Production wires an interactive stdin y/N prompt;
+	// tests script it. Behind a seam for the same reason as the others.
+	overwritePrompt func(paths []string) (bool, error)
+
+	// anonctlApply builds the target.Applier that lands a produced plan onto the
+	// anonctl substrate (its base dir + Runner + sub-target), GIVEN the overwrite
+	// policy the run resolved from --overwrite / the interactive prompt. It is a
+	// factory (not a bare Applier) so the create-only-vs-overwrite decision, chosen
+	// at Run time from the flag, reaches the applier's retry-on-collision. Production
+	// wires the real anonctl applier; tests return a recording applier (ignoring the
+	// policy, since a fake never collides).
+	anonctlApply func(policy target.OverwritePolicy) target.Applier
 
 	// piPresent reports whether the `pi` binary is reachable (on PATH), so the seed
 	// can WARN loudly (in red) when the seeded config will have no pi to run it.
@@ -76,6 +89,10 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 		targetFlag = fs.String("target", "", "substrate to seed into {anonctl,anonbox}; empty detects present substrates and asks")
 		endpoint   = fs.String("endpoint", "", "the local model endpoint host:port the seeded pi reaches directly (asked interactively if omitted)")
 		force      = fs.Bool("force-allow-local-llm-api-key", false, "seed a real-looking apiKey anyway (normally refused; a local model ignores its key)")
+		// overwrite is the create-only escape hatch: by default a seed that would
+		// clobber an existing file fails (and, interactively, ASKS); --overwrite
+		// pre-authorises the overwrite with no prompt (for non-interactive re-seeds).
+		overwrite = fs.Bool("overwrite", false, "overwrite existing seeded files instead of failing on a collision (default: create-only; asked interactively when a collision is hit)")
 		// webveil is default-ON (an agent that cannot search is crippled); these
 		// flags are the disable + socket-override knobs of the seed-time decision tree.
 		noWebveil        = fs.Bool("no-webveil", false, "do NOT wire webveil web search (default: wired when a SearXNG is detected)")
@@ -145,8 +162,10 @@ func (h piHandler) Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Fan out: drive the seed against each target through the driver (which skips a
-	// target the seed does not declare) and route each plan into its applier.
-	appliers := target.DefaultAppliers(h.anonctlApply)
+	// target the seed does not declare) and route each plan into its applier. The
+	// anonctl applier is create-only-first with an overwrite fallback: --overwrite
+	// pre-authorises (no prompt), otherwise a collision ASKS via overwritePrompt.
+	appliers := target.DefaultAppliers(h.anonctlApply(h.overwritePolicy(*overwrite)))
 	outcomes := target.Run(ctx, s, seed.Options{Endpoint: resolvedEndpoint}, targets, appliers)
 
 	return reportOutcomes(outcomes, stdout, stderr)
@@ -165,6 +184,23 @@ func (h piHandler) resolveTargets(ctx context.Context, targetFlag string, stderr
 		return []seed.Target{t}, nil
 	}
 	return target.Select(ctx, h.detector, h.prompt)
+}
+
+// overwritePolicy resolves the OverwritePolicy the anonctl applier consults ON a
+// collision. --overwrite pre-authorises with no prompt (target.AlwaysOverwrite,
+// for a non-interactive re-seed). Otherwise the operator is ASKED via the
+// overwritePrompt seam, listing the colliding paths, so a collision is an
+// interactive decision rather than a dead-end error. When no prompt is wired
+// (should not happen in production), the create-only default stands
+// (target.NeverOverwrite).
+func (h piHandler) overwritePolicy(overwrite bool) target.OverwritePolicy {
+	if overwrite {
+		return target.AlwaysOverwrite
+	}
+	if h.overwritePrompt == nil {
+		return target.NeverOverwrite
+	}
+	return h.overwritePrompt
 }
 
 // reportOutcomes prints one line per target outcome (applied / skipped / errored)
@@ -194,11 +230,14 @@ func reportOutcomes(outcomes []target.Outcome, stdout, stderr io.Writer) int {
 // stays seam-injectable for tests.
 func newPiHandler() piHandler {
 	return piHandler{
-		resolveSeed:    resolvePiSeed,
-		detector:       target.EnvDetector{},
-		prompt:         interactiveTargetPrompt,
-		endpointPrompt: interactiveEndpointPrompt,
-		piPresent:      piOnPath,
-		anonctlApply:   target.AnonctlDefaultHomeApplier(anonctl.Applier{Runner: provisionExecRunner()}, false),
+		resolveSeed:     resolvePiSeed,
+		detector:        target.EnvDetector{},
+		prompt:          interactiveTargetPrompt,
+		endpointPrompt:  interactiveEndpointPrompt,
+		overwritePrompt: interactiveOverwritePrompt,
+		piPresent:       piOnPath,
+		anonctlApply: func(policy target.OverwritePolicy) target.Applier {
+			return target.AnonctlDefaultHomeApplier(anonctl.Applier{Runner: provisionExecRunner()}, policy)
+		},
 	}
 }

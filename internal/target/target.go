@@ -41,9 +41,11 @@ package target
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
+	"github.com/wighawag/anoncore/seedhome"
 	"github.com/wighawag/anonseed/internal/anonbox"
 	"github.com/wighawag/anonseed/internal/anonctl"
 	"github.com/wighawag/anonseed/internal/seed"
@@ -228,14 +230,61 @@ func DefaultAppliers(anonctlApply Applier) map[seed.Target]Applier {
 	}
 }
 
+// OverwritePolicy decides, ON a create-only collision, whether the seed may
+// overwrite the colliding files. It is consulted ONLY when the first (create-only)
+// apply reports a collision, and receives the home-relative paths that already
+// exist (from seedhome.ErrCollision). Returning (true, nil) authorises an
+// overwrite retry; (false, nil) declines (the collision stands, reported as a
+// clean error, nothing written); a non-nil error aborts.
+//
+// This is the seam both the `--overwrite` flag and the interactive overwrite
+// prompt flow through: the flag wires a policy that always returns true (no
+// prompt); the default wires a policy that ASKS the operator. Keeping it a
+// function means the applier does the create-only-then-maybe-overwrite dance
+// without knowing WHICH of the two decided.
+type OverwritePolicy func(paths []string) (bool, error)
+
+// AlwaysOverwrite is the OverwritePolicy the `--overwrite` flag wires: it
+// authorises the overwrite retry unconditionally (no prompt), because the operator
+// already asked for it on argv.
+func AlwaysOverwrite(_ []string) (bool, error) { return true, nil }
+
+// NeverOverwrite is the OverwritePolicy for a non-interactive run with no
+// `--overwrite`: it declines every overwrite, so a collision stays a clean error
+// (the create-only default) rather than silently clobbering.
+func NeverOverwrite(_ []string) (bool, error) { return false, nil }
+
 // AnonctlDefaultHomeApplier adapts the anonctl applier's ApplyDefaultHome (the
 // box-wide default-home sub-target, the common seed target) to the target.Applier
 // seam, discarding the rich anonctl.Result (the fan-out only needs success or
 // error; a caller wanting the detailed result calls the applier directly). It
 // exists so the CLI can wire the anonctl target with one call.
-func AnonctlDefaultHomeApplier(a anonctl.Applier, force bool) Applier {
+//
+// It is create-only-first with an overwrite fallback: it applies with force=false,
+// and if that reports a seedhome collision it consults policy with the colliding
+// paths. When the policy authorises (the `--overwrite` flag, or an interactive
+// yes), it re-applies with force=true; otherwise the original collision error
+// stands (nothing was written on the first attempt: the collision check is
+// atomic). A nil policy means create-only with no fallback (equivalent to
+// NeverOverwrite).
+func AnonctlDefaultHomeApplier(a anonctl.Applier, policy OverwritePolicy) Applier {
 	return func(ctx context.Context, plan seed.SeedPlan) error {
-		_, err := a.ApplyDefaultHome(ctx, plan, force)
+		_, err := a.ApplyDefaultHome(ctx, plan, false)
+		if err == nil {
+			return nil
+		}
+		var collision *seedhome.ErrCollision
+		if !errors.As(err, &collision) || policy == nil {
+			return err
+		}
+		ok, perr := policy(collision.Paths)
+		if perr != nil {
+			return perr
+		}
+		if !ok {
+			return err
+		}
+		_, err = a.ApplyDefaultHome(ctx, plan, true)
 		return err
 	}
 }

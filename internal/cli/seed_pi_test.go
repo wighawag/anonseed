@@ -40,6 +40,14 @@ func (r *recordingApplier) apply(_ context.Context, plan seed.SeedPlan) error {
 	return nil
 }
 
+// factory wraps a fixed target.Applier as the handler's anonctlApply factory,
+// ignoring the overwrite policy (a recording/fake applier never collides, so the
+// policy is irrelevant to it). Tests that assert on the policy inject their own
+// factory instead.
+func factory(a target.Applier) func(target.OverwritePolicy) target.Applier {
+	return func(target.OverwritePolicy) target.Applier { return a }
+}
+
 // newTestPiHandler builds a pi handler with every impure seam faked: the seed
 // resolution returns the given stub seed, detection returns the given present
 // set, the prompt returns the given choice, and the anonctl applier records. No
@@ -52,7 +60,7 @@ func newTestPiHandler(s seed.Seed, present, chosen []seed.Target, ctl *recording
 		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return present }),
 		prompt:         func([]seed.Target) ([]seed.Target, error) { return chosen, nil },
 		endpointPrompt: failEndpointPrompt,
-		anonctlApply:   ctl.apply,
+		anonctlApply:   factory(ctl.apply),
 	}
 }
 
@@ -95,7 +103,7 @@ func TestPiPromptsForEndpointWhenFlagOmitted(t *testing.T) {
 		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
 		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
 		endpointPrompt: func() (string, error) { return "192.168.1.150:8080", nil },
-		anonctlApply:   ctl.apply,
+		anonctlApply:   factory(ctl.apply),
 	}
 	// No --endpoint on argv: the prompt must supply it. --target anonctl to keep the
 	// path deterministic (no detection/prompt for the substrate axis).
@@ -158,7 +166,7 @@ func TestPiExplicitTargetRoutesToApplier(t *testing.T) {
 		}),
 		prompt:         func([]seed.Target) ([]seed.Target, error) { promptCalled = true; return nil, nil },
 		endpointPrompt: failEndpointPrompt,
-		anonctlApply:   ctl.apply,
+		anonctlApply:   factory(ctl.apply),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -254,7 +262,7 @@ func TestPiUnsupportedTargetSkippedCleanly(t *testing.T) {
 		}),
 		prompt:         func(p []seed.Target) ([]seed.Target, error) { return p, nil },
 		endpointPrompt: failEndpointPrompt,
-		anonctlApply:   ctl.apply,
+		anonctlApply:   factory(ctl.apply),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -306,7 +314,7 @@ func TestPiWebveilFlagsThreadToResolve(t *testing.T) {
 		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
 		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
 		endpointPrompt: failEndpointPrompt,
-		anonctlApply:   (&recordingApplier{}).apply,
+		anonctlApply:   factory((&recordingApplier{}).apply),
 	}
 	var stdout, stderr bytes.Buffer
 	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl",
@@ -335,7 +343,7 @@ func TestPiWebveilDefaultOnChoice(t *testing.T) {
 		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
 		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
 		endpointPrompt: failEndpointPrompt,
-		anonctlApply:   (&recordingApplier{}).apply,
+		anonctlApply:   factory((&recordingApplier{}).apply),
 	}
 	var stdout, stderr bytes.Buffer
 	h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
@@ -358,7 +366,7 @@ func TestPiSeedResolutionFailureAborts(t *testing.T) {
 		}),
 		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
 		endpointPrompt: failEndpointPrompt,
-		anonctlApply:   ctl.apply,
+		anonctlApply:   factory(ctl.apply),
 	}
 	var stdout, stderr bytes.Buffer
 	code := h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
@@ -370,5 +378,63 @@ func TestPiSeedResolutionFailureAborts(t *testing.T) {
 	}
 	if len(ctl.got) != 0 {
 		t.Error("applier ran despite a seed-resolution failure")
+	}
+}
+
+// policyCapturingHandler builds a handler whose anonctlApply factory records the
+// OverwritePolicy it was handed (by probing it), so a test can assert which policy
+// the run selected from --overwrite / the prompt. The factory returns a no-op
+// applier (the policy decision is what matters, not the write).
+func policyCapturingHandler(t *testing.T, gotOverwrite *bool, promptAns bool) piHandler {
+	t.Helper()
+	return piHandler{
+		resolveSeed: func(_ context.Context, _ string, _ bool, _ piseed.WebveilChoice, _, _ io.Writer) (seed.Seed, error) {
+			return stubPiSeed{targets: []seed.Target{seed.TargetAnonctl}}, nil
+		},
+		detector:       target.DetectorFunc(func(context.Context) []seed.Target { return nil }),
+		prompt:         func([]seed.Target) ([]seed.Target, error) { return nil, nil },
+		endpointPrompt: failEndpointPrompt,
+		overwritePrompt: func([]string) (bool, error) {
+			*gotOverwrite = true // the prompt was the policy consulted
+			return promptAns, nil
+		},
+		anonctlApply: func(policy target.OverwritePolicy) target.Applier {
+			// Probe the policy: AlwaysOverwrite (from --overwrite) returns true with no
+			// prompt; the prompt-backed policy calls overwritePrompt (flipping the flag).
+			ok, _ := policy([]string{".pi/agent/models.json"})
+			_ = ok
+			return func(context.Context, seed.SeedPlan) error { return nil }
+		},
+	}
+}
+
+// TestPiOverwriteFlagAuthorisesWithoutPrompt: with --overwrite, the selected policy
+// is AlwaysOverwrite, so a collision would be authorised WITHOUT ever asking the
+// prompt.
+func TestPiOverwriteFlagAuthorisesWithoutPrompt(t *testing.T) {
+	promptConsulted := false
+	h := policyCapturingHandler(t, &promptConsulted, false)
+	var stdout, stderr bytes.Buffer
+	code := h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl", "--overwrite"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if promptConsulted {
+		t.Error("--overwrite must NOT consult the interactive prompt (it pre-authorises)")
+	}
+}
+
+// TestPiNoOverwriteFlagConsultsPrompt: without --overwrite, the selected policy is
+// the interactive prompt, so a collision ASKS the operator.
+func TestPiNoOverwriteFlagConsultsPrompt(t *testing.T) {
+	promptConsulted := false
+	h := policyCapturingHandler(t, &promptConsulted, true)
+	var stdout, stderr bytes.Buffer
+	code := h.Run([]string{"--endpoint", "127.0.0.1:1234", "--target", "anonctl"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if !promptConsulted {
+		t.Error("without --overwrite, a collision must consult the interactive prompt")
 	}
 }

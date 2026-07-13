@@ -42,6 +42,8 @@ Given the local model endpoint's `host:port` (via `--endpoint`, or asked interac
 
 The substrate is chosen with `--target {anonctl,anonbox}`; with no `--target`, anonseed detects the present substrates and asks which to seed.
 
+Seeding is create-only: if a file the seed would write already exists in the target home, anonseed does not silently clobber it. Interactively it lists the colliding files and asks whether to overwrite (default: no, keeping the existing files). For a non-interactive re-seed, pass `--overwrite` to authorise the overwrite up front (no prompt).
+
 ## Release
 
 Releases are cut by pushing a `vX.Y.Z` tag; a GitHub Actions workflow runs goreleaser to cross-compile the Linux binaries (amd64, arm64, armv7, armv6), build checksums, and publish them to the GitHub Release.

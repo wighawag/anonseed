@@ -9,10 +9,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wighawag/anoncore/seedhome"
 	"github.com/wighawag/anonseed/internal/anonbox"
+	"github.com/wighawag/anonseed/internal/anonctl"
 	"github.com/wighawag/anonseed/internal/seed"
 	"github.com/wighawag/anonseed/internal/target"
 )
+
+// fakeChownRunner satisfies the anonctl Runner seam for the collision-retry tests:
+// the file copy is real I/O into a temp base dir, but the chown seedhome issues is
+// recorded and returns success (no root needed).
+type fakeChownRunner struct{}
+
+func (fakeChownRunner) Run(_ context.Context, _ string, _ ...string) (string, string, error) {
+	return "", "", nil
+}
 
 // fakeSeed is a trivial in-test seed declaring a chosen set of targets and
 // returning a fixed plan. It exercises the fan-out + skip logic without any real
@@ -404,5 +415,119 @@ func TestEnvDetectorSniffsAnonctlBaseDir(t *testing.T) {
 	got := present.Detect(context.Background())
 	if !reflect.DeepEqual(got, []seed.Target{seed.TargetAnonctl}) {
 		t.Errorf("Detect with an existing base dir = %v, want [anonctl] (anonbox never present yet)", got)
+	}
+}
+
+// --- AnonctlDefaultHomeApplier overwrite policy ------------------------------
+//
+// These exercise the create-only-first / overwrite-on-policy behaviour against a
+// REAL anonctl applier pointed at a temp base dir, so the seedhome collision is a
+// genuine one (not a mocked error). The first apply seeds the home; the second
+// apply is the collision, and the policy decides whether it overwrites.
+
+// applierIntoTempHome returns an AnonctlDefaultHomeApplier over a fresh temp base
+// dir with the given policy, plus the base dir so a test can assert file contents.
+func applierIntoTempHome(t *testing.T, policy target.OverwritePolicy) (target.Applier, string) {
+	t.Helper()
+	base := t.TempDir()
+	a := anonctl.Applier{BaseDir: base, Runner: fakeChownRunner{}}
+	return target.AnonctlDefaultHomeApplier(a, policy), base
+}
+
+// TestAnonctlApplierFirstSeedCreatesFiles: with nothing pre-existing, the first
+// apply lands the plan's files (the create-only happy path, no policy consulted).
+func TestAnonctlApplierFirstSeedCreatesFiles(t *testing.T) {
+	policyCalled := false
+	policy := func([]string) (bool, error) { policyCalled = true; return true, nil }
+	apply, base := applierIntoTempHome(t, policy)
+
+	if err := apply(context.Background(), samplePlan()); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if policyCalled {
+		t.Error("policy consulted on a first seed (no collision); it must only fire on a collision")
+	}
+	if _, err := os.Stat(filepath.Join(base, "default-home", ".pi", "agent", "models.json")); err != nil {
+		t.Errorf("first seed should have written the file: %v", err)
+	}
+}
+
+// TestAnonctlApplierCollisionDeclinedSurfacesError: re-applying onto an existing
+// seed with a DECLINING policy (NeverOverwrite) leaves the collision error
+// standing (nothing overwritten) rather than clobbering.
+func TestAnonctlApplierCollisionDeclinedSurfacesError(t *testing.T) {
+	apply, base := applierIntoTempHome(t, target.NeverOverwrite)
+	if err := apply(context.Background(), samplePlan()); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+
+	// Second apply with DIFFERENT content: the decline must keep the ORIGINAL bytes.
+	changed := seed.SeedPlan{Files: []seed.FileToWrite{{Path: ".pi/agent/models.json", Content: "CHANGED"}}}
+	err := apply(context.Background(), changed)
+	var collision *seedhome.ErrCollision
+	if !errors.As(err, &collision) {
+		t.Fatalf("declined overwrite should surface the collision, got %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(base, "default-home", ".pi", "agent", "models.json"))
+	if string(got) != "{}" {
+		t.Errorf("declined overwrite must not change the file; got %q, want the original {}", got)
+	}
+}
+
+// TestAnonctlApplierCollisionAuthorisedOverwrites: re-applying with an AUTHORISING
+// policy (AlwaysOverwrite, the --overwrite flag) clobbers the existing file with
+// the new content and reports the colliding paths to the policy.
+func TestAnonctlApplierCollisionAuthorisedOverwrites(t *testing.T) {
+	var gotPaths []string
+	policy := func(paths []string) (bool, error) { gotPaths = paths; return true, nil }
+	apply, base := applierIntoTempHome(t, policy)
+	if err := apply(context.Background(), samplePlan()); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+
+	changed := seed.SeedPlan{Files: []seed.FileToWrite{{Path: ".pi/agent/models.json", Content: "CHANGED"}}}
+	if err := apply(context.Background(), changed); err != nil {
+		t.Fatalf("authorised overwrite should succeed, got %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(base, "default-home", ".pi", "agent", "models.json"))
+	if string(got) != "CHANGED" {
+		t.Errorf("authorised overwrite should have clobbered the file; got %q", got)
+	}
+	found := false
+	for _, p := range gotPaths {
+		if strings.Contains(p, "models.json") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("policy should receive the colliding paths, got %v", gotPaths)
+	}
+}
+
+// TestAnonctlApplierPolicyErrorAborts: a policy that ERRORS aborts the apply with
+// that error (no overwrite attempted).
+func TestAnonctlApplierPolicyErrorAborts(t *testing.T) {
+	boom := errors.New("policy boom")
+	apply, _ := applierIntoTempHome(t, func([]string) (bool, error) { return false, boom })
+	if err := apply(context.Background(), samplePlan()); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	changed := seed.SeedPlan{Files: []seed.FileToWrite{{Path: ".pi/agent/models.json", Content: "X"}}}
+	if err := apply(context.Background(), changed); !errors.Is(err, boom) {
+		t.Errorf("policy error should abort with that error, got %v", err)
+	}
+}
+
+// TestAnonctlApplierNilPolicyIsCreateOnly: a nil policy means create-only with no
+// fallback (a collision surfaces, never overwritten).
+func TestAnonctlApplierNilPolicyIsCreateOnly(t *testing.T) {
+	apply, _ := applierIntoTempHome(t, nil)
+	if err := apply(context.Background(), samplePlan()); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	err := apply(context.Background(), samplePlan())
+	var collision *seedhome.ErrCollision
+	if !errors.As(err, &collision) {
+		t.Errorf("nil policy should stay create-only (surface the collision), got %v", err)
 	}
 }

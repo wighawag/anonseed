@@ -86,6 +86,50 @@ func TestDefaultPickInvalidChoiceErrors(t *testing.T) {
 	}
 }
 
+// TestOverwritePromptYes: an explicit "y" authorises the overwrite and the prompt
+// lists the colliding paths so the operator sees what is being clobbered.
+func TestOverwritePromptYes(t *testing.T) {
+	var out bytes.Buffer
+	ok, err := overwritePromptFrom(strings.NewReader("y\n"), &out, []string{".pi/agent/models.json", ".pi/agent/settings.json"})
+	if err != nil {
+		t.Fatalf("overwritePromptFrom: %v", err)
+	}
+	if !ok {
+		t.Error("answer \"y\" should authorise the overwrite")
+	}
+	if !strings.Contains(out.String(), ".pi/agent/models.json") || !strings.Contains(out.String(), ".pi/agent/settings.json") {
+		t.Errorf("prompt should list the colliding paths, got %q", out.String())
+	}
+}
+
+// TestOverwritePromptDefaultNo: an empty answer keeps the create-only default (do
+// NOT overwrite), so the operator must opt in to clobbering.
+func TestOverwritePromptDefaultNo(t *testing.T) {
+	for _, in := range []string{"\n", "n\n", "no\n", "anything\n"} {
+		var out bytes.Buffer
+		ok, err := overwritePromptFrom(strings.NewReader(in), &out, []string{"a"})
+		if err != nil {
+			t.Fatalf("overwritePromptFrom(%q): %v", in, err)
+		}
+		if ok {
+			t.Errorf("answer %q should NOT authorise the overwrite (create-only default)", strings.TrimSpace(in))
+		}
+	}
+}
+
+// TestOverwritePromptEOFIsNo: no input (EOF / non-interactive) takes the safe
+// default: do NOT overwrite, rather than blocking or clobbering.
+func TestOverwritePromptEOFIsNo(t *testing.T) {
+	var out bytes.Buffer
+	ok, err := overwritePromptFrom(strings.NewReader(""), &out, []string{"a"})
+	if err != nil {
+		t.Fatalf("overwritePromptFrom: %v", err)
+	}
+	if ok {
+		t.Error("EOF should be a NO (safe create-only default)")
+	}
+}
+
 // present/absent detect seams for the searxng prompt tests.
 func detectPresent(path string) func() (piseed.SearxngDetection, error) {
 	return func() (piseed.SearxngDetection, error) {

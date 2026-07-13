@@ -349,6 +349,44 @@ func interactiveEndpointPrompt() (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
+// interactiveOverwritePrompt is the production overwrite prompt: ON a create-only
+// collision (the seed would clobber files the home already has), it lists the
+// colliding paths and asks the operator whether to overwrite, defaulting to NO on
+// an empty line or EOF (create-only is the safe default; the operator must opt in
+// to clobbering). Behind the handler's overwritePrompt seam, so cli tests script
+// the y/N answer without real stdin. Passing --overwrite bypasses this entirely
+// (the policy pre-authorises with no prompt).
+func interactiveOverwritePrompt(paths []string) (bool, error) {
+	return overwritePromptFrom(os.Stdin, os.Stderr, paths)
+}
+
+// overwritePromptFrom is interactiveOverwritePrompt's testable core: it lists the
+// colliding paths to out and reads a y/N answer from in, so a test drives it with
+// a string reader and a buffer (no real stdin/stderr). An empty answer or EOF is
+// NO (the create-only default), so a non-interactive run never silently clobbers.
+func overwritePromptFrom(in io.Reader, out io.Writer, paths []string) (bool, error) {
+	fmt.Fprintf(out, "anonseed pi: %d file(s) already exist in the target home:\n", len(paths))
+	for _, p := range paths {
+		fmt.Fprintf(out, "  - %s\n", p)
+	}
+	fmt.Fprintf(out, "Overwrite them? (default: no, keeps existing) [y/N]: ")
+
+	reader := bufio.NewReader(in)
+	line, err := reader.ReadString('\n')
+	ans := strings.ToLower(strings.TrimSpace(line))
+	if err != nil && ans == "" {
+		// No input available (EOF / non-interactive): take the safe default (do NOT
+		// overwrite) rather than blocking or clobbering.
+		return false, nil
+	}
+	switch ans {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
 // interactiveTargetPrompt is the production detect-then-ask prompt: given the
 // substrates detected PRESENT, it asks the operator (on stdin) which to seed, so
 // the default path NEVER silently auto-picks. It reads a comma-separated choice
