@@ -17,7 +17,7 @@
 //
 // anonctl's `lanexempt` is Go-INTERNAL (un-importable), and there is no anonctl
 // pure-validate CLI verb to shell out to (`anonctl verify` is a LIVE egress
-// prover needing root + a provisioned account, the WRONG tool, and prd story 26
+// prover needing root + a provisioned account, the WRONG tool, and spec story 26
 // forbids anonseed re-implementing an egress prover). So anonseed keeps a small
 // ALIGNED COPY of the allow-list POLICY here. The drift risk this creates, and
 // the follow-up to extract the guardrail into anoncore if a third consumer

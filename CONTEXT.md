@@ -1,6 +1,6 @@
 # CONTEXT — anonseed domain language
 
-The domain glossary for `anonseed`. Agents and skills use THIS vocabulary when naming modules, tests, and discussing the system. Architectural rationale lives in `docs/adr/` (decisions); product framing lives in `work/prds/`.
+The domain glossary for `anonseed`. Agents and skills use THIS vocabulary when naming modules, tests, and discussing the system. Architectural rationale lives in `docs/adr/` (decisions); product framing lives in `work/specs/`.
 
 ## What anonseed is
 

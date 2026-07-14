@@ -1,7 +1,7 @@
 ---
 title: The API-key credential-shedding guard (refuse a real key unless forced)
 slug: apikey-credential-guard
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [bootstrap-go-module-and-cli-skeleton]
 covers: [9, 25]
 ---
@@ -34,4 +34,4 @@ End to end: given a candidate apiKey, the guard classifies benign-vs-real; a rea
 >
 > FIRST, check against reality: confirm the `SeedPlan`/seed shapes from `seed-interface-and-seedplan` so the guard slots in where a key would enter a plan.
 >
-> Test the classifier (benign vs real, forced) AND write the acceptance-level assertion the prd names as a core seam: a seeded home (temp fixture) never contains a real credential. Done = classifier + refusal + the seeded-home assertion, gate green. RECORD the benign-set choice (and any divergence from anon-pi's) in the done record.
+> Test the classifier (benign vs real, forced) AND write the acceptance-level assertion the spec names as a core seam: a seeded home (temp fixture) never contains a real credential. Done = classifier + refusal + the seeded-home assertion, gate green. RECORD the benign-set choice (and any divergence from anon-pi's) in the done record.

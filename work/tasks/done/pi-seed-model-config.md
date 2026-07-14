@@ -1,7 +1,7 @@
 ---
 title: The pi seed — model config (probe, pick, synthesize models.json + settings.json)
 slug: pi-seed-model-config
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [seed-interface-and-seedplan, apikey-credential-guard]
 covers: [15, 16, 17, 18, 19, 20, 21]
 ---

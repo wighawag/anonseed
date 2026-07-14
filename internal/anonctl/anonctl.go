@@ -23,8 +23,8 @@
 // # Two sub-targets (the home axis)
 //
 // ApplyDefaultHome seeds the box-wide default-home template every fresh
-// `anonctl add` inherits (prd story 11); ApplyAccountHome seeds a SPECIFIC
-// already-provisioned anon account's home (prd story 13). Both land the plan's
+// `anonctl add` inherits (spec story 11); ApplyAccountHome seeds a SPECIFIC
+// already-provisioned anon account's home (spec story 13). Both land the plan's
 // Files through the SAME safe-write surface (internal/homewrite -> anoncore
 // seedhome: setuid/setgid/sticky stripped, symlinks refused, mode-700, an ATOMIC
 // create-only collision check), and merge the plan's Exceptions into the SAME

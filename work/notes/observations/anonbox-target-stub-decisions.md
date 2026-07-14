@@ -1,6 +1,6 @@
 # 2026-07-10 — anonbox target stub: applier shape, loud-outcome, and the "pi seed declares it" scope decision
 
-Decisions made while building `anonbox-target-stub` (prd `anonseed-config-seeder`, stories 23 + 22b). Recorded here so the done record can link them; the intended anonbox delivery shape also lives verbatim in the `internal/anonbox` package doc.
+Decisions made while building `anonbox-target-stub` (spec `anonseed-config-seeder`, stories 23 + 22b). Recorded here so the done record can link them; the intended anonbox delivery shape also lives verbatim in the `internal/anonbox` package doc.
 
 ## The applier is a concrete `Apply(ctx, SeedPlan) error`, not a new shared `Applier` interface
 

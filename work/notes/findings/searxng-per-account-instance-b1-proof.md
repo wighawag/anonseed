@@ -36,18 +36,18 @@ SearXNG keeps a WRITABLE per-process cache in SQLite (`sxng_cache_DATA_CACHE.db`
 
 ## What is shared vs per-account (the reuse answer)
 
-| Shared (read-only, one copy) | Per-account (isolated) |
-| --- | --- |
-| SearXNG code (`searxng-src`) | socket path (`http-socket`) |
-| Python venv (`searx-pyenv`) | settings file + `secret_key` (`SEARXNG_SETTINGS_PATH`) |
-| the uwsgi binary + plugins | writable cache dir (`TMPDIR` / cache path) |
-| | uid/gid (run AS the anon account) |
+| Shared (read-only, one copy) | Per-account (isolated)                                 |
+| ---------------------------- | ------------------------------------------------------ |
+| SearXNG code (`searxng-src`) | socket path (`http-socket`)                            |
+| Python venv (`searx-pyenv`)  | settings file + `secret_key` (`SEARXNG_SETTINGS_PATH`) |
+| the uwsgi binary + plugins   | writable cache dir (`TMPDIR` / cache path)             |
+|                              | uid/gid (run AS the anon account)                      |
 
 No valkey/redis needed per instance: `limiter: false` in the host settings, and the limiter is the only valkey consumer. (If a future instance turned the limiter on, it would need a valkey \u2014 out of scope here.)
 
 ## Lifecycle owner (the fork this was meant to resolve)
 
-The uwsgi orchestration on this host is the Debian sysv `uwsgi` init script globbing `/etc/uwsgi/apps-enabled/*.ini` (a symlink farm), NOT the emperor. So B1's lifecycle is literally: drop a per-account `<name>.ini` into `apps-enabled/` (with `uid=anon-<name>`, its socket, its `SEARXNG_SETTINGS_PATH`, its TMPDIR) and reload uwsgi. That is host service state, though \u2014 writing into `/etc/uwsgi` is beyond a strictly-declarative home-seeding step, so it REOPENS the prd's Q2(ii) pin (does the seed stage/launch a service). See the idea note for the B0-B3 landscape and which owner to pick.
+The uwsgi orchestration on this host is the Debian sysv `uwsgi` init script globbing `/etc/uwsgi/apps-enabled/*.ini` (a symlink farm), NOT the emperor. So B1's lifecycle is literally: drop a per-account `<name>.ini` into `apps-enabled/` (with `uid=anon-<name>`, its socket, its `SEARXNG_SETTINGS_PATH`, its TMPDIR) and reload uwsgi. That is host service state, though \u2014 writing into `/etc/uwsgi` is beyond a strictly-declarative home-seeding step, so it REOPENS the spec's Q2(ii) pin (does the seed stage/launch a service). See the idea note for the B0-B3 landscape and which owner to pick.
 
 ## Honest caveats
 

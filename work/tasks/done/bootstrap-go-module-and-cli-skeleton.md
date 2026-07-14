@@ -1,7 +1,7 @@
 ---
 title: Bootstrap the Go module and anonseed CLI skeleton (green gate)
 slug: bootstrap-go-module-and-cli-skeleton
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: []
 covers: [1, 3, 4, 5]
 ---

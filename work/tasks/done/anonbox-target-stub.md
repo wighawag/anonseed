@@ -1,7 +1,7 @@
 ---
 title: The anonbox target as a declared-but-stubbed substrate
 slug: anonbox-target-stub
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [seed-interface-and-seedplan]
 covers: [23, 22b]
 ---

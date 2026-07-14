@@ -13,7 +13,7 @@ The applier (`target.AnonctlDefaultHomeApplier`) is now create-only-FIRST with a
 
 ## Naming: `--overwrite`, NOT `--update`
 
-`--update` was considered and REJECTED: anonctl already owns an `add`/`update` pair where `update` means "modify an existing default exemption". Reusing `--update` here would fork that established verb under a new meaning (the REVIEW-PROTOCOL flags exactly this: a new name for an existing concept). `--overwrite` matches the codebase's own create-only/overwrite domain language (`homewrite.go`, PRD story 14: "never overwriting an existing seeded file without an explicit force") and reads truthfully against the collision message.
+`--update` was considered and REJECTED: anonctl already owns an `add`/`update` pair where `update` means "modify an existing default exemption". Reusing `--update` here would fork that established verb under a new meaning (the REVIEW-PROTOCOL flags exactly this: a new name for an existing concept). `--overwrite` matches the codebase's own create-only/overwrite domain language (`homewrite.go`, spec story 14: "never overwriting an existing seeded file without an explicit force") and reads truthfully against the collision message.
 
 ## Deliberately NOT done: a pre-`resolveSeed` pre-flight
 

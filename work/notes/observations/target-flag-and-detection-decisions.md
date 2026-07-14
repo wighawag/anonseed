@@ -1,6 +1,6 @@
 # 2026-07-10 — the --target axis: a reusable target package, the CLI pi-handler wiring, and the deferred interactive pick
 
-Decisions made while building `target-flag-and-detection` (prd `anonseed-config-seeder`, stories 22f + 22g). Recorded here so the done record can link them; the load-bearing ones also live as doc comments at their choice sites (`internal/target`, `internal/cli/seed_pi.go`, `internal/cli/pi_production.go`).
+Decisions made while building `target-flag-and-detection` (spec `anonseed-config-seeder`, stories 22f + 22g). Recorded here so the done record can link them; the load-bearing ones also live as doc comments at their choice sites (`internal/target`, `internal/cli/seed_pi.go`, `internal/cli/pi_production.go`).
 
 ## The `--target` axis lives in a NEW package `internal/target`, not inlined in the CLI
 

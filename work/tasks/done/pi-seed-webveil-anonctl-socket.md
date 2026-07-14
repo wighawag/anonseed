@@ -1,7 +1,7 @@
 ---
 title: The pi seed — webveil (SearXNG) default-on for the anonctl target
 slug: pi-seed-webveil-anonctl-socket
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [pi-seed-model-config]
 covers: [22, 22a, 22c, 22d, 22e]
 ---

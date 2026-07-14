@@ -26,4 +26,4 @@ Alternatives considered and dropped as premature surface (no consumer yet): a `R
 
 ## Acceptance seam (story 25)
 
-`TestSeededHomeNeverContainsRealCredential` asserts the prd's core invariant directly: it seeds a real home (a temp fixture) through the REAL `homewrite.Write` + anoncore `seedhome` (chown behind a fake Runner, no root), then walks every on-disk file and fails if any contains the known real secret or an `apiKey` that `LooksReal`. It also asserts a normal (non-forced) seed with a real key is refused BEFORE any file is written, so the credential never reaches the home in the first place.
+`TestSeededHomeNeverContainsRealCredential` asserts the spec's core invariant directly: it seeds a real home (a temp fixture) through the REAL `homewrite.Write` + anoncore `seedhome` (chown behind a fake Runner, no root), then walks every on-disk file and fails if any contains the known real secret or an `apiKey` that `LooksReal`. It also asserts a normal (non-forced) seed with a real key is refused BEFORE any file is written, so the credential never reaches the home in the first place.

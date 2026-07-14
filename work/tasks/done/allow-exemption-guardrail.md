@@ -1,7 +1,7 @@
 ---
 title: The --allow exemption type + fail-fast pre-validation (not the authoritative guardrail)
 slug: allow-exemption-guardrail
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [bootstrap-go-module-and-cli-skeleton]
 covers: [8, 19]
 ---
@@ -33,7 +33,7 @@ End to end: a good LAN/loopback `IP:port` parses to a valid `Exception`; a publi
 >
 > Rules to mirror (from anonctl's README + `internal/lanexempt`): accept RFC1918 + link-local; accept loopback `127.0.0.1:<port>` via a STRICTER check that rejects `:53` and anonymizer control/SOCKS/DNS ports (Tor 9050/9150/9051, generic 1080); reject public, hostname/non-IP, `:53`, and port-omitted (a port is MANDATORY — the all-ports form is a deanonymization vector). REUSE anoncore's `endpoint` package classification (`Classify`, the loopback/Tor-port logic, `DefaultHost`) where it overlaps so only the allow-list POLICY is anonseed-local.
 >
-> IMPORTANT layering (write it into the code comments + an ADR): this pre-validation is CONVENIENCE (fail-fast), NOT the authoritative guardrail. anonctl's `internal/lanexempt` is authoritative and Go-INTERNAL (un-importable), and there is no anonctl pure-validate CLI verb to shell out to (`anonctl verify` is a LIVE egress prover needing root + a provisioned account — the WRONG tool, and prd story 26 forbids anonseed re-implementing an egress prover). So anonseed keeps a small aligned copy of the POLICY. WRITE an ADR in `docs/adr/` recording: the pre-check-vs-authoritative-apply-time layering, the drift risk, and a follow-up idea (`work/notes/ideas/`) to extract the guardrail into anoncore IF a third consumer appears (which would reopen anoncore ADR-0001, currently pinning lanexempt as anonctl-per-tool).
+> IMPORTANT layering (write it into the code comments + an ADR): this pre-validation is CONVENIENCE (fail-fast), NOT the authoritative guardrail. anonctl's `internal/lanexempt` is authoritative and Go-INTERNAL (un-importable), and there is no anonctl pure-validate CLI verb to shell out to (`anonctl verify` is a LIVE egress prover needing root + a provisioned account — the WRONG tool, and spec story 26 forbids anonseed re-implementing an egress prover). So anonseed keeps a small aligned copy of the POLICY. WRITE an ADR in `docs/adr/` recording: the pre-check-vs-authoritative-apply-time layering, the drift risk, and a follow-up idea (`work/notes/ideas/`) to extract the guardrail into anoncore IF a third consumer appears (which would reopen anoncore ADR-0001, currently pinning lanexempt as anonctl-per-tool).
 >
 > FIRST, check against reality: read anonctl's `internal/lanexempt` accept/reject cases and anoncore's `endpoint` classification on disk; align to what actually landed.
 >

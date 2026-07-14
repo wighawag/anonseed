@@ -1,7 +1,7 @@
 ---
 title: The anonctl target — write default-home / account home + defaults.json allow
 slug: anonctl-target-file-conventions
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [seed-interface-and-seedplan, anoncore-seedhome-safe-write, allow-exemption-guardrail]
 covers: [8, 11, 12, 13]
 ---

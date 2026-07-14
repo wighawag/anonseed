@@ -10,15 +10,15 @@ The registry is a `map[string]Handler` keyed by seed name (`registry.go`, `defau
 
 ## The unknown-seed seam (reserved PATH-plugin hook)
 
-An unknown first positional (`anonseed nope`) fails loudly (exit 2) and lists the available seeds. Per CONTEXT.md "PATH-plugin (reserved)" and PRD story 24, this error site is exactly where the future git/kubectl-style fallback (`anonseed foo` -> exec PATH `anonseed-foo`) will hook in. That fallback is NOT built here (speculative until a third-party seed exists); only the seam is stood up. No new concept was introduced — this reuses the already-glossed "PATH-plugin (reserved)" term.
+An unknown first positional (`anonseed nope`) fails loudly (exit 2) and lists the available seeds. Per CONTEXT.md "PATH-plugin (reserved)" and spec story 24, this error site is exactly where the future git/kubectl-style fallback (`anonseed foo` -> exec PATH `anonseed-foo`) will hook in. That fallback is NOT built here (speculative until a third-party seed exists); only the seam is stood up. No new concept was introduced — this reuses the already-glossed "PATH-plugin (reserved)" term.
 
 ## How `--version` is sourced
 
 `--version` reports a package-level `var version = "dev"` in `internal/cli` (NOT a const, NOT `runtime/debug.BuildInfo`). It is overridable at build time via the linker: `go build -ldflags "-X github.com/wighawag/anonseed/internal/cli.version=v0.1.0"`. Chosen so a release can stamp a clean tag without a source edit while a plain `go build` still yields a usable dev string. A test (`TestVersionOverridable`) pins that the reported string tracks the var.
 
-## LICENSE vs the PRD "Out of Scope" note (drift resolved toward the task)
+## LICENSE vs the spec "Out of Scope" note (drift resolved toward the task)
 
-The PRD launch snapshot lists "A `LICENSE` file — not written by this scaffold" under Out of Scope, but the TASK's acceptance criteria (authored later, at tasking time) explicitly require a verbatim AGPL-3.0 `LICENSE` and module metadata declaring AGPL-3.0-only. The task is the operative spec, so I wrote `LICENSE` (verbatim FSF AGPL-3.0 text, sha256 `0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0`) and added `// SPDX-License-Identifier: AGPL-3.0-only` to `main.go` (Go has no license field in `go.mod`, so an SPDX header is the idiomatic declaration). Recorded because a reader of the PRD alone might expect no LICENSE.
+The spec launch snapshot lists "A `LICENSE` file — not written by this scaffold" under Out of Scope, but the TASK's acceptance criteria (authored later, at tasking time) explicitly require a verbatim AGPL-3.0 `LICENSE` and module metadata declaring AGPL-3.0-only. The task is the operative spec, so I wrote `LICENSE` (verbatim FSF AGPL-3.0 text, sha256 `0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0`) and added `// SPDX-License-Identifier: AGPL-3.0-only` to `main.go` (Go has no license field in `go.mod`, so an SPDX header is the idiomatic declaration). Recorded because a reader of the spec alone might expect no LICENSE.
 
 ## go.mod language version
 

@@ -138,7 +138,7 @@ func guardedSeedModels(candidateKey string, force bool) (seed.SeedPlan, error) {
 }
 
 // TestSeededHomeNeverContainsRealCredential is the acceptance-level assertion the
-// prd names as a core seam (story 25): after a NORMAL (non-forced) seed of a home
+// spec names as a core seam (story 25): after a NORMAL (non-forced) seed of a home
 // (a temp fixture, seeded through the real homewrite.Write + anoncore seedhome),
 // that home NEVER contains a real-looking credential. We drive it with a REAL key
 // and assert the seed is refused so nothing lands, THEN with a placeholder and

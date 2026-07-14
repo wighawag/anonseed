@@ -1,7 +1,7 @@
 ---
 title: The target-aware declarative Seed interface + SeedPlan types
 slug: seed-interface-and-seedplan
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [bootstrap-go-module-and-cli-skeleton]
 covers: [3, 22g]
 ---
@@ -34,7 +34,7 @@ End to end: a trivial fake seed (returns a fixed `SeedPlan`, supports one target
 
 > Goal: pin the built-in-seed interface (the hard-to-reverse core abstraction) so `pi` and future seeds share one declarative shape. Domain: a SEED declares config FILES to write into a target identity's home plus the direct-egress `--allow` EXCEPTIONS the tool needs; a TARGET is the substrate that delivers the plan (`anonctl` now, `anonbox` later). Seed-type and target are ORTHOGONAL axes.
 >
-> The pinned shape (from the prd's resolved fork on the seed interface): `Seed{ Name(); Targets() []Target; Plan(ctx, opts, target) (SeedPlan, error) }` and `SeedPlan{ Files []FileToWrite; Exceptions []Exception }`. Three load-bearing decisions to honour: (i) `Exceptions` is a LIST (supports >1 and ZERO — a socket-wired service needs none); (ii) the interface is STRICTLY DECLARATIVE (files + exceptions only — no "launch a service", that lifecycle is anonctl/anoncore's job); (iii) `Plan` is PURE and takes the target as input (the interactive model-pick and the substrate writing live UPSTREAM/DOWNSTREAM of Plan, not inside it). `SeedPlan` MUST be JSON-serializable (the future PATH-plugin emits it on stdout).
+> The pinned shape (from the spec's resolved fork on the seed interface): `Seed{ Name(); Targets() []Target; Plan(ctx, opts, target) (SeedPlan, error) }` and `SeedPlan{ Files []FileToWrite; Exceptions []Exception }`. Three load-bearing decisions to honour: (i) `Exceptions` is a LIST (supports >1 and ZERO — a socket-wired service needs none); (ii) the interface is STRICTLY DECLARATIVE (files + exceptions only — no "launch a service", that lifecycle is anonctl/anoncore's job); (iii) `Plan` is PURE and takes the target as input (the interactive model-pick and the substrate writing live UPSTREAM/DOWNSTREAM of Plan, not inside it). `SeedPlan` MUST be JSON-serializable (the future PATH-plugin emits it on stdout).
 >
 > FIRST, check against reality: confirm the CLI skeleton from `bootstrap-go-module-and-cli-skeleton` landed with the dispatch registry this interface plugs into; build on its real shape, not an assumed one.
 >

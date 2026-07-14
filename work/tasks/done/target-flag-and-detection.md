@@ -1,7 +1,7 @@
 ---
 title: The --target substrate flag + interactive detect-then-ask + multi-target fan-out
 slug: target-flag-and-detection
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [anonctl-target-file-conventions, seed-interface-and-seedplan]
 covers: [22f, 22g]
 ---

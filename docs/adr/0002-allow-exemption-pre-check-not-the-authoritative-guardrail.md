@@ -4,7 +4,7 @@ anonseed validates a direct-egress `--allow` value (`internal/allowguard`) into 
 
 ## Considered Options
 
-- **Shell out to anonctl to validate.** Rejected: there is no anonctl pure-validate CLI verb. `anonctl verify` is a LIVE egress prover needing root + a provisioned account (the WRONG tool), and prd story 26 forbids anonseed re-implementing an egress prover. There is nothing to call.
+- **Shell out to anonctl to validate.** Rejected: there is no anonctl pure-validate CLI verb. `anonctl verify` is a LIVE egress prover needing root + a provisioned account (the WRONG tool), and spec story 26 forbids anonseed re-implementing an egress prover. There is nothing to call.
 - **Import anonctl's `internal/lanexempt` directly.** Rejected: it is Go-INTERNAL (un-importable) by design. anonctl keeps its guardrail per-tool (anoncore ADR-0001 pins `lanexempt` as anonctl-per-tool, deliberately NOT extracted into anoncore).
 - **No pre-check at all (let anonctl reject at apply time).** Rejected as poor UX: a bad `--allow` value would be written and only surface as a confusing failure on the operator's next `anonctl add`, far from where they typed it. The whole point is failing where the value is entered.
 - **A small aligned COPY of the POLICY (chosen).** anonseed keeps `internal/allowguard`, mirroring `lanexempt`'s accept/reject matrix VERBATIM, reusing anoncore's `endpoint` primitives (`endpoint.DefaultHost`, `endpoint.Classify` for the 9050/9150 Tor-SOCKS subset) so only the allow-list POLICY is anonseed-local, not the address parsing.

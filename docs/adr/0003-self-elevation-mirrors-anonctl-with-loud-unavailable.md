@@ -4,7 +4,7 @@ anonseed writes host state under `/etc/anonctl` (root-owned) for the anonctl tar
 
 ## Considered Options
 
-- **Print "run this as root" hints (the anti-goal).** Rejected: the PRD (story 10) explicitly wants root-requiring operations to self-elevate rather than print paste-these-commands, mirroring anonctl. Command-printing is exactly the stance this task replaces.
+- **Print "run this as root" hints (the anti-goal).** Rejected: the SPEC (story 10) explicitly wants root-requiring operations to self-elevate rather than print paste-these-commands, mirroring anonctl. Command-printing is exactly the stance this task replaces.
 - **`pkexec` / a polkit GUI prompt.** Rejected for the same reason anonctl rejects it: on a tty `sudo` prompts in-terminal, whereas `pkexec` pops a GUI dialog the family avoids.
 - **Extract elevation into anoncore and import it.** Rejected for now: anoncore v0.1.0 ships NO elevation package (its `sudoprobe` is a pure classifier of `sudo -l` output, a different concern, not a re-exec mechanism), and anonctl keeps its `elevate.go` private in `package main`. There is nothing to import. anonseed keeps a small aligned copy in `internal/elevate`; if a third consumer appears, extracting into anoncore becomes the right call (same trajectory as the `--allow` guardrail, ADR-0002).
 - **Adopt anonctl's mechanism VERBATIM but adjust the three points below (chosen).** The mechanism is identical; only the DECISION SHAPE, the UNAVAILABLE handling, and the (absent) session branch differ, each for a concrete anonseed reason.

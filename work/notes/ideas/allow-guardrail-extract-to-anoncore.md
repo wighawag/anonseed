@@ -31,4 +31,4 @@ A THIRD consumer of the same guardrail would tip the balance. At that point, ext
 
 ## Provenance
 
-Spun out of the `allow-exemption-guardrail` task (prd `anonseed-config-seeder`, stories 8 + 19). The pre-check-vs-authoritative layering and the drift risk are recorded in `docs/adr/0002-allow-exemption-pre-check-not-the-authoritative-guardrail.md`; this note holds the extract-if-third-consumer follow-up so the trigger is not lost.
+Spun out of the `allow-exemption-guardrail` task (spec `anonseed-config-seeder`, stories 8 + 19). The pre-check-vs-authoritative layering and the drift risk are recorded in `docs/adr/0002-allow-exemption-pre-check-not-the-authoritative-guardrail.md`; this note holds the extract-if-third-consumer follow-up so the trigger is not lost.

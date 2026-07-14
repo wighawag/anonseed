@@ -1,7 +1,7 @@
 ---
 title: Self-elevation for root-requiring /etc/anonctl writes
 slug: self-elevation-for-etc-writes
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [bootstrap-go-module-and-cli-skeleton]
 covers: [10]
 ---

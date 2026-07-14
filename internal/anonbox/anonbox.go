@@ -10,7 +10,7 @@
 // on the way there (no partial write, no crash). This keeps the target axis
 // HONEST: anonbox is a real, DECLARED target the driver can route to and a seed
 // can list in its Targets(), while the real image-based delivery is a visible,
-// flagged non-delivery rather than a silent no-op-success or a panic. See prd
+// flagged non-delivery rather than a silent no-op-success or a panic. See spec
 // story 23 (task anonbox-target-stub).
 //
 // Contrast the anonctl applier (task anonctl-target-file-conventions), which is
@@ -43,14 +43,14 @@
 //     applier has no analogue for, and the piece that genuinely blocks on anonbox
 //     existing.
 //
-// # webveil for anonbox comes FROM THE IMAGE (prd story 22b)
+// # webveil for anonbox comes FROM THE IMAGE (spec story 22b)
 //
 // On the anonbox target, webveil (SearXNG) is provided by the STAGED IMAGE:
 // SearXNG is baked into the image and already running, so nothing is installed
 // on the host and webveil points at the in-image socket. This is the proven
 // anon-pi/netcage model. It DIFFERS from the anonctl target, where webveil is
 // wired over a per-account host Unix socket that the seed detects and points at
-// (task pi-seed-webveil-anonctl-socket, prd story 22c). So the anonbox webveil
+// (task pi-seed-webveil-anonctl-socket, spec story 22c). So the anonbox webveil
 // story is NOT implemented here; it is RECORDED so the later image-staging
 // implementation wires webveil from the image rather than re-deriving it. On
 // anonbox, webveil needs NO --allow exception either (an in-image socket has no

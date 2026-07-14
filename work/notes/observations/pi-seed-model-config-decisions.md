@@ -1,6 +1,6 @@
 # 2026-07-10 — pi seed (model config): the resolve/plan split, the picks-carrier seam, and the placeholder-key default
 
-Decisions made while building `pi-seed-model-config` (prd `anonseed-config-seeder`, stories 15-21). Recorded here so the done record can link them; each also lives as a doc comment at its choice site in `internal/piseed`.
+Decisions made while building `pi-seed-model-config` (spec `anonseed-config-seeder`, stories 15-21). Recorded here so the done record can link them; each also lives as a doc comment at its choice site in `internal/piseed`.
 
 ## Where the resolved picks ride: on the Seed VALUE (New), not smuggled into `seed.Options`
 

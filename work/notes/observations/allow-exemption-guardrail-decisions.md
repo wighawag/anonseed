@@ -1,10 +1,10 @@
 # 2026-07-10 — `--allow` exemption guardrail: layering, naming, and reuse decisions
 
-Decisions made while building `allow-exemption-guardrail` (prd `anonseed-config-seeder`, stories 8 + 19). Recorded here so the done record can link them; the load-bearing layering also lives in `docs/adr/0002` and in the `internal/allowguard` package doc.
+Decisions made while building `allow-exemption-guardrail` (spec `anonseed-config-seeder`, stories 8 + 19). Recorded here so the done record can link them; the load-bearing layering also lives in `docs/adr/0002` and in the `internal/allowguard` package doc.
 
 ## The pre-check-vs-authoritative layering (see ADR-0002)
 
-anonseed's `internal/allowguard` is a FAIL-FAST pre-check, NOT the security boundary. anonctl's `internal/lanexempt` stays authoritative (re-validated on every `add`/`update`). anonseed keeps a small aligned COPY of the policy because `lanexempt` is Go-internal (un-importable) and there is no pure-validate anonctl CLI verb to shell out to (`anonctl verify` is a live egress prover, the wrong tool; prd story 26 forbids re-implementing a prover). Full rationale + the drift mitigations in `docs/adr/0002`; the extract-if-a-third-consumer follow-up is `work/notes/ideas/allow-guardrail-extract-to-anoncore.md`.
+anonseed's `internal/allowguard` is a FAIL-FAST pre-check, NOT the security boundary. anonctl's `internal/lanexempt` stays authoritative (re-validated on every `add`/`update`). anonseed keeps a small aligned COPY of the policy because `lanexempt` is Go-internal (un-importable) and there is no pure-validate anonctl CLI verb to shell out to (`anonctl verify` is a live egress prover, the wrong tool; spec story 26 forbids re-implementing a prover). Full rationale + the drift mitigations in `docs/adr/0002`; the extract-if-a-third-consumer follow-up is `work/notes/ideas/allow-guardrail-extract-to-anoncore.md`.
 
 ## Concept-coherence: two `Exception`s, split by layer (deliberate)
 

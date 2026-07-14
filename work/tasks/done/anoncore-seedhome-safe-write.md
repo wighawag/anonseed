@@ -1,7 +1,7 @@
 ---
 title: Resolve target identity + safe home-write via anoncore seedhome
 slug: anoncore-seedhome-safe-write
-prd: anonseed-config-seeder
+spec: anonseed-config-seeder
 blockedBy: [bootstrap-go-module-and-cli-skeleton]
 covers: [6, 7, 14]
 ---
